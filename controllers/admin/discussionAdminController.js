@@ -4,6 +4,7 @@ const MAX_CLUE = 3;
 const Workspace = require("../../models/Workspace");
 const WorkspaceAttempt = require("../../models/WorkspaceAttempt");
 const DiscussionClueLog = require("../../models/DiscussionClueLog");
+const MateriAnswer = require("../../models/MateriAnswer");
 
 exports.listMateri = async (req, res) => {
   try {
@@ -237,5 +238,72 @@ exports.workspaceAttempts = async (req, res) => {
   } catch (err) {
     console.error("workspaceAttempts error:", err);
     return res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+exports.saveMateriAnswer = async (req, res) => {
+  try {
+
+    const { materiId, pseudocode, flowchart } = req.body;
+
+    let answer = await MateriAnswer.findOne({
+      where: { materiId }
+    });
+
+    if (answer) {
+
+      await answer.update({
+        pseudocode,
+        flowchart
+      });
+
+    } else {
+
+      answer = await MateriAnswer.create({
+        materiId,
+        pseudocode,
+        flowchart
+      });
+
+    }
+
+    return res.json({ status: true, data: answer });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false });
+  }
+};
+
+exports.getMateriAnswer = async (req, res) => {
+  try {
+
+    const roomId = req.params.roomId;
+
+    // ambil materi_id dari room
+    const room = await sequelize.query(
+      `SELECT materi_id FROM discussion_rooms WHERE id = ? LIMIT 1`,
+      {
+        replacements: [roomId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!room.length) {
+      return res.status(404).json({ status: false, message: "Room not found" });
+    }
+
+    const materiId = room[0].materi_id;
+
+    // ambil jawaban materi
+    const answer = await MateriAnswer.findOne({
+      where: { materiId }
+    });
+
+    return res.json({ status: true, data: answer });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false });
   }
 };
