@@ -65,7 +65,7 @@ exports.uploadOrientasi = async (req, res) => {
   }
 
   try {
-    const url = `https://thinkcode-backend-production.up.railway.app/uploads/orientasi/${req.file.filename}`;  // Force HTTPS lengkap
+    const url = `https://thinkcode-backend11-production.up.railway.app/uploads/orientasi/${req.file.filename}`;  // Force HTTPS lengkap
     let step = await MateriSection.findOne({ where: { materiId: req.params.id, type: 'video', title: 'Orientasi' } });
     if (step) await step.update({ content: url });
     else step = await MateriSection.create({ materiId: req.params.id, title: "Orientasi", type: "video", content: url, order: 0 });
@@ -127,7 +127,7 @@ exports.uploadSectionImage = async (req, res) => {
   }
 
   try {
-    const url = `https://thinkcode-backend-production.up.railway.app/uploads/orientasi/${req.file.filename}`;  // Force HTTPS lengkap, konsisten
+    const url = `https://thinkcode-backend11-production.up.railway.app/uploads/orientasi/${req.file.filename}`;  // Force HTTPS lengkap, konsisten
     res.json({ url });
   } catch (err) {
     console.error('Upload Section Image Error:', err);
