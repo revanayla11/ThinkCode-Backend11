@@ -1,5 +1,5 @@
 const User = require("../../models/User");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const { Op } = require("sequelize");
 const RoomMember = require("../../models/RoomMember");
 const DiscussionRoom = require("../../models/DiscussionRoom");
