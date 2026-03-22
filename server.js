@@ -36,7 +36,7 @@ const server = http.createServer(app);
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://thinkcode-vol1.vercel.app/"
+    "https://thinkcode-vol1.vercel.app"
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  
