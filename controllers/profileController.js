@@ -3,7 +3,7 @@ const UserMateriProgress = require("../models/UserMateriProgress");
 const UserBadge = require("../models/UserBadge");
 const Badge = require("../models/Badge");
 const Materi = require("../models/Materi");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 exports.getProfile = async (req, res) => {
   try {
