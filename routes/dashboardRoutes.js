@@ -9,7 +9,7 @@ const User = require("../models/User");
 const UserMateriProgress = require("../models/UserMateriProgress");
 const DiscussionRoom = require("../models/DiscussionRoom");
 const DiscussionMessage = require("../models/DiscussionMessage");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 router.get("/", verifyToken, dashboardController.getDashboard);
 router.get("/teacher", verifyToken, async (req, res) => {
