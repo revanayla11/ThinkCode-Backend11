@@ -9,17 +9,21 @@ const MateriAnswer = sequelize.define("MateriAnswer", {
   },
   materiId: {
     type: DataTypes.INTEGER,
-    allowNull: false
+    allowNull: false,
+    field: 'materi_id'  
   },
   pseudocode: {
-    type: DataTypes.TEXT
+    type: DataTypes.TEXT,
+    allowNull: true    
   },
   flowchart: {
-    type: DataTypes.JSON
+    type: DataTypes.JSON,
+    allowNull: true    
   }
 }, {
   tableName: "materi_answers",
-  timestamps: true
+  timestamps: true,
+  underscored: true    
 });
 
 module.exports = MateriAnswer;

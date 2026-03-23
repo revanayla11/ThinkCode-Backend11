@@ -1,5 +1,6 @@
 const User = require("./User");
 const Materi = require("./Materi");
+const MateriAnswer = require("./MateriAnswer");
 const MateriSection = require("./MateriSection");
 const UserMateriProgress = require("./UserMateriProgress");
 const DiscussionRoom = require("./DiscussionRoom");
@@ -97,9 +98,14 @@ DiscussionRoom.hasMany(WorkspaceAttempt, { foreignKey: "roomId", as: "attempts" 
 
 RoomTaskProgress.belongsTo(DiscussionRoom, { foreignKey: "roomId", as: "room" });
 DiscussionRoom.hasMany(RoomTaskProgress, { foreignKey: "roomId", as: "tasks" });
+
+Materi.hasOne(MateriAnswer, { foreignKey: "materiId", as: "answer" });
+MateriAnswer.belongsTo(Materi, { foreignKey: "materiId", as: "materi" });
+
 module.exports = {
   User,
   Materi,
+  MateriAnswer,
   MateriSection,
   UserMateriProgress,
   DiscussionRoom,

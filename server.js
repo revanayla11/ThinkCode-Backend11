@@ -8,6 +8,7 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 
 require("./models/User");
 require("./models/Materi");
+require("./models/MateriAnswer");
 require("./models/MateriSection");
 require("./models/UserMateriProgress");
 require("./models/DiscussionRoom");
@@ -154,6 +155,7 @@ await models.UserProgress.sync({ alter: true });
 await models.UserBadge.sync({ alter: true });
 await models.TeacherFeedback.sync({ alter: true });
 await models.MateriSection.sync({ alter: true });
+await models.MateriAnswer.sync({ alter: true });
 await models.RoomMember.sync({ alter: true });
 
 
