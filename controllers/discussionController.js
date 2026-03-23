@@ -716,8 +716,9 @@ exports.validateWorkspace = async (req, res) => {
     console.log(`🔍 Validasi workspace room ${roomId} oleh user ${userId}`);
 
     // 1. Cek workspace siswa ada?
-    const workspace = await Workspace.findOne({ where: { roomId } });
+    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
     if (!workspace) {
+      console.log(`❌ Workspace tidak ditemukan untuk roomId: ${roomId}`);
       return res.status(400).json({ 
         valid: false, 
         message: "Belum ada workspace yang disimpan. Simpan pseudocode & flowchart dulu!" 
@@ -727,23 +728,33 @@ exports.validateWorkspace = async (req, res) => {
     // 2. Ambil materiId dari room
     const room = await DiscussionRoom.findByPk(roomId);
     if (!room) {
+      console.log(`❌ Room tidak ditemukan: ${roomId}`);
       return res.status(404).json({ valid: false, message: "Room tidak ditemukan" });
     }
 
+    console.log(`✅ Room ditemukan: materiId=${room.materiId}`);
+
     // 3. Ambil jawaban resmi admin
-    const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
+    const officialAnswer = await MateriAnswer.findOne({ 
+      where: { materiId: room.materiId } 
+    });
     if (!officialAnswer || !officialAnswer.pseudocode) {
+      console.log(`❌ Jawaban resmi tidak ditemukan untuk materiId: ${room.materiId}`);
       return res.status(400).json({ 
         valid: false, 
         message: "Admin belum menyetel jawaban resmi. Hubungi admin!" 
       });
     }
 
-    // 4. VALIDASI PSEUDOCODE (case-insensitive, trim)
+    console.log(`✅ Jawaban resmi ditemukan`);
+
+    // 4. VALIDASI PSEUDOCODE
     const normalizeText = (text) => (text || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
     const studentPseudo = normalizeText(workspace.pseudocode);
     const officialPseudo = normalizeText(officialAnswer.pseudocode);
     const pseudocodeMatch = studentPseudo === officialPseudo;
+
+    console.log(`Pseudocode match: ${pseudocodeMatch}`);
 
     // 5. VALIDASI FLOWCHART
     let flowchartMatch = true;
@@ -754,9 +765,10 @@ exports.validateWorkspace = async (req, res) => {
         ? JSON.parse(workspace.flowchart || '{}') 
         : (workspace.flowchart || { conditions: [], elseInstruction: '' });
       
-      const officialFlowchart = officialAnswer.flowchart || { conditions: [], elseInstruction: '' };
+      const officialFlowchart = typeof officialAnswer.flowchart === 'string'
+        ? JSON.parse(officialAnswer.flowchart || '{}')
+        : (officialAnswer.flowchart || { conditions: [], elseInstruction: '' });
 
-      // Cek jumlah kondisi
       const studentConditions = Array.isArray(studentFlowchart.conditions) ? studentFlowchart.conditions : [];
       const officialConditions = Array.isArray(officialFlowchart.conditions) ? officialFlowchart.conditions : [];
       
@@ -768,8 +780,8 @@ exports.validateWorkspace = async (req, res) => {
 
       if (studentConditions.length !== officialConditions.length) {
         flowchartMatch = false;
+        console.log(`❌ Jumlah kondisi tidak cocok: student=${studentConditions.length}, official=${officialConditions.length}`);
       } else {
-        // Cek setiap kondisi
         for (let i = 0; i < studentConditions.length; i++) {
           const studentCond = normalizeText(studentConditions[i]?.condition);
           const officialCond = normalizeText(officialConditions[i]?.condition);
@@ -792,6 +804,7 @@ exports.validateWorkspace = async (req, res) => {
     } catch (parseError) {
       flowchartMatch = false;
       console.error("Flowchart parse error:", parseError);
+      flowchartDetails = { error: "Format flowchart tidak valid" };
     }
 
     const isValid = pseudocodeMatch && flowchartMatch;
@@ -799,7 +812,7 @@ exports.validateWorkspace = async (req, res) => {
     console.log(`✅ Validasi selesai: ${isValid ? 'BENAR' : 'SALAH'}`, {
       pseudocodeMatch,
       flowchartMatch,
-      studentConditions: studentFlowchart?.conditions?.length || 0
+      studentConditionsCount: studentConditions?.length || 0
     });
 
     res.json({
@@ -817,7 +830,10 @@ exports.validateWorkspace = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Validasi error:", error);
-    res.status(500).json({ valid: false, message: "Server error saat validasi" });
+    console.error("❌ Validasi workspace ERROR:", error);
+    res.status(500).json({ 
+      valid: false, 
+      message: "Server error saat validasi: " + error.message 
+    });
   }
 };
