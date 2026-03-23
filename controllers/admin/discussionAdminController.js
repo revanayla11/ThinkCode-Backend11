@@ -251,35 +251,73 @@ exports.deleteRoom = async (req, res) => {
 
 exports.workspaceLatest = async (req, res) => {
   try {
-    console.log("Fetching workspace for roomId:", req.params.roomId);
+    console.log("🎯 Fetching LATEST workspace for roomId:", req.params.roomId);
+    const roomId = parseInt(req.params.roomId);
+    
     const workspace = await Workspace.findOne({
-      where: { roomId: req.params.roomId }
+      where: { roomId },
+      order: [['createdAt', 'DESC']] // Pastikan latest
     });
-    console.log("Workspace data found:", workspace);
-    return res.json({ status: true, data: workspace });
+
+    if (workspace) {
+      // Format flowchart JSON
+      const formatted = {
+        ...workspace.toJSON(),
+        flowchart: workspace.flowchart ? JSON.parse(workspace.flowchart) : null
+      };
+      console.log("✅ Latest workspace found:", formatted.pseudocode ? 'YES' : 'NO');
+      return res.json({ status: true, data: formatted });
+    }
+
+    console.log("❌ No workspace found");
+    return res.json({ status: true, data: null });
   } catch (err) {
-    console.error("workspaceLatest error:", err);
+    console.error("❌ workspaceLatest ERROR:", err);
     return res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
 exports.workspaceAttempts = async (req, res) => {
   try {
-    console.log("Fetching attempts for roomId:", req.params.roomId);
+    console.log("📊 Fetching attempts for roomId:", req.params.roomId);
+    const roomId = parseInt(req.params.roomId);
+    
     const attempts = await WorkspaceAttempt.findAll({
-      where: { roomId: req.params.roomId },
-      order: [["type", "ASC"], ["attemptNumber", "ASC"]]
+      where: { roomId },
+      order: [["attemptNumber", "ASC"], ["createdAt", "ASC"]]
     });
-    console.log("Attempts data found:", attempts.length, "items");
-    return res.json({ status: true, data: attempts });
+
+    console.log(`📈 Raw attempts: ${attempts.length}`);
+
+    // ✅ FORMAT DATA untuk frontend
+    const formattedAttempts = attempts.map(attempt => ({
+      id: attempt.id,
+      roomId: attempt.roomId,
+      type: attempt.type, // 'pseudocode' atau 'flowchart'
+      attemptNumber: attempt.attemptNumber,
+      content: attempt.content || null,
+      success: attempt.success || false, // Tambah field ini
+      createdAt: attempt.createdAt,
+      
+      // 🆕 MAP ke format yang diharapkan frontend
+      pseudocode: attempt.type === 'pseudocode' ? attempt.content : null,
+      flowchart: attempt.type === 'flowchart' ? 
+        (attempt.content ? JSON.parse(attempt.content) : null) : null
+    }));
+
+    console.log(`✅ Formatted attempts: ${formattedAttempts.length}`);
+    console.log("Sample:", formattedAttempts[0]);
+
+    return res.json({ 
+      status: true, 
+      data: formattedAttempts 
+    });
   } catch (err) {
-    console.error("workspaceAttempts error:", err);
+    console.error("❌ workspaceAttempts ERROR:", err);
     return res.status(500).json({ status: false, message: "Server error" });
   }
 };
-// discussionAdminController.js - UPDATE getMateriAnswer & roomDetail
 
-// UPDATE fungsi getMateriAnswer (sudah ada, tapi perbaiki)
 exports.getMateriAnswer = async (req, res) => {
   try {
     const roomId = req.params.roomId;
