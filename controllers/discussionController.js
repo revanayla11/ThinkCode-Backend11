@@ -9,6 +9,7 @@ const RoomMember = require("../models/RoomMember");
 const RoomTaskProgress = require("../models/RoomTaskProgress");
 const Workspace = require("../models/Workspace");
 const WorkspaceAttempt = require("../models/WorkspaceAttempt");
+const MateriAnswer = require("../models/MateriAnswer");
 
 exports.syncUserXp = async (userId, materiId, transaction = null) => {
   const user = await User.findByPk(userId, { attributes: ['xp'], transaction });
@@ -704,5 +705,119 @@ exports.getSubmissionStatus = async (req, res) => {
   } catch (err) {
     console.error("getSubmissionStatus:", err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.validateWorkspace = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user.id;
+
+    console.log(`🔍 Validasi workspace room ${roomId} oleh user ${userId}`);
+
+    // 1. Cek workspace siswa ada?
+    const workspace = await Workspace.findOne({ where: { roomId } });
+    if (!workspace) {
+      return res.status(400).json({ 
+        valid: false, 
+        message: "Belum ada workspace yang disimpan. Simpan pseudocode & flowchart dulu!" 
+      });
+    }
+
+    // 2. Ambil materiId dari room
+    const room = await DiscussionRoom.findByPk(roomId);
+    if (!room) {
+      return res.status(404).json({ valid: false, message: "Room tidak ditemukan" });
+    }
+
+    // 3. Ambil jawaban resmi admin
+    const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
+    if (!officialAnswer || !officialAnswer.pseudocode) {
+      return res.status(400).json({ 
+        valid: false, 
+        message: "Admin belum menyetel jawaban resmi. Hubungi admin!" 
+      });
+    }
+
+    // 4. VALIDASI PSEUDOCODE (case-insensitive, trim)
+    const normalizeText = (text) => (text || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
+    const studentPseudo = normalizeText(workspace.pseudocode);
+    const officialPseudo = normalizeText(officialAnswer.pseudocode);
+    const pseudocodeMatch = studentPseudo === officialPseudo;
+
+    // 5. VALIDASI FLOWCHART
+    let flowchartMatch = true;
+    let flowchartDetails = {};
+
+    try {
+      const studentFlowchart = typeof workspace.flowchart === 'string' 
+        ? JSON.parse(workspace.flowchart || '{}') 
+        : (workspace.flowchart || { conditions: [], elseInstruction: '' });
+      
+      const officialFlowchart = officialAnswer.flowchart || { conditions: [], elseInstruction: '' };
+
+      // Cek jumlah kondisi
+      const studentConditions = Array.isArray(studentFlowchart.conditions) ? studentFlowchart.conditions : [];
+      const officialConditions = Array.isArray(officialFlowchart.conditions) ? officialFlowchart.conditions : [];
+      
+      flowchartDetails = {
+        conditionsCountMatch: studentConditions.length === officialConditions.length,
+        conditions: [],
+        elseMatch: normalizeText(studentFlowchart.elseInstruction) === normalizeText(officialFlowchart.elseInstruction)
+      };
+
+      if (studentConditions.length !== officialConditions.length) {
+        flowchartMatch = false;
+      } else {
+        // Cek setiap kondisi
+        for (let i = 0; i < studentConditions.length; i++) {
+          const studentCond = normalizeText(studentConditions[i]?.condition);
+          const officialCond = normalizeText(officialConditions[i]?.condition);
+          const studentYes = normalizeText(studentConditions[i]?.yes);
+          const officialYes = normalizeText(officialConditions[i]?.yes);
+
+          const condMatch = {
+            index: i + 1,
+            conditionMatch: studentCond === officialCond,
+            yesMatch: studentYes === officialYes
+          };
+
+          flowchartDetails.conditions.push(condMatch);
+          
+          if (!condMatch.conditionMatch || !condMatch.yesMatch) {
+            flowchartMatch = false;
+          }
+        }
+      }
+    } catch (parseError) {
+      flowchartMatch = false;
+      console.error("Flowchart parse error:", parseError);
+    }
+
+    const isValid = pseudocodeMatch && flowchartMatch;
+
+    console.log(`✅ Validasi selesai: ${isValid ? 'BENAR' : 'SALAH'}`, {
+      pseudocodeMatch,
+      flowchartMatch,
+      studentConditions: studentFlowchart?.conditions?.length || 0
+    });
+
+    res.json({
+      valid: isValid,
+      details: {
+        pseudocodeMatch,
+        flowchartMatch,
+        flowchartDetails,
+        pseudocode: {
+          student: workspace.pseudocode?.trim(),
+          official: officialAnswer.pseudocode?.trim(),
+          match: pseudocodeMatch
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Validasi error:", error);
+    res.status(500).json({ valid: false, message: "Server error saat validasi" });
   }
 };

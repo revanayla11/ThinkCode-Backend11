@@ -109,12 +109,16 @@ exports.roomDetail = async (req, res) => {
     console.log(`DEBUG: Clue used for room ${roomId}: ${used}`); // Tambah log untuk debug
     const maxClue = 3; // Sesuaikan dengan siswa
 
+    const materiAnswerRes = await this.getMateriAnswer(req, res);
+    const materiAnswer = materiAnswerRes ? materiAnswerRes.data : null;
+
     return res.json({
       status: true,
       data: {
         room,
         messages,
-        clue: { used, max: maxClue }
+        clue: { used, max: maxClue },
+        materiAnswer
       }
     });
 
@@ -123,6 +127,7 @@ exports.roomDetail = async (req, res) => {
     return res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
 
 exports.toggleRoom = async (req, res) => {
   try {
@@ -240,47 +245,14 @@ exports.workspaceAttempts = async (req, res) => {
     return res.status(500).json({ status: false, message: "Server error" });
   }
 };
+// discussionAdminController.js - UPDATE getMateriAnswer & roomDetail
 
-exports.saveMateriAnswer = async (req, res) => {
-  try {
-
-    const { materiId, pseudocode, flowchart } = req.body;
-
-    let answer = await MateriAnswer.findOne({
-      where: { materiId }
-    });
-
-    if (answer) {
-
-      await answer.update({
-        pseudocode,
-        flowchart
-      });
-
-    } else {
-
-      answer = await MateriAnswer.create({
-        materiId,
-        pseudocode,
-        flowchart
-      });
-
-    }
-
-    return res.json({ status: true, data: answer });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false });
-  }
-};
-
+// UPDATE fungsi getMateriAnswer (sudah ada, tapi perbaiki)
 exports.getMateriAnswer = async (req, res) => {
   try {
-
     const roomId = req.params.roomId;
 
-    // ambil materi_id dari room
+    // Ambil materi_id dari room
     const room = await sequelize.query(
       `SELECT materi_id FROM discussion_rooms WHERE id = ? LIMIT 1`,
       {
@@ -295,7 +267,7 @@ exports.getMateriAnswer = async (req, res) => {
 
     const materiId = room[0].materi_id;
 
-    // ambil jawaban materi
+    // Ambil jawaban materi berdasarkan materiId
     const answer = await MateriAnswer.findOne({
       where: { materiId }
     });
@@ -307,3 +279,5 @@ exports.getMateriAnswer = async (req, res) => {
     res.status(500).json({ status: false });
   }
 };
+
+// UPDATE roomDetail - TAMBAHKAN materiAnswer

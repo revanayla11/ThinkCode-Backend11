@@ -18,8 +18,7 @@ router.delete("/rooms/:id", verifyToken, isAdmin, ctrl.deleteRoom);
 
 router.get("/workspace/attempts/:roomId", verifyToken, isAdmin, ctrl.workspaceAttempts);
 router.get("/workspace/latest/:roomId", verifyToken, isAdmin, ctrl.workspaceLatest);
-
-router.get("/admin/materi/answer/:roomId", ctrl.getMateriAnswer);
-router.post("/materi/answer", verifyToken, isAdmin, ctrl.saveMateriAnswer);
+  
+router.get("/admin/materi/answer/:roomId", verifyToken, isAdmin, ctrl.getMateriAnswer);
 
 module.exports = router;

@@ -26,6 +26,7 @@ router.post(
 router.post("/workspace/pseudocode/:roomId/save", verifyToken, discussionController.savePseudocode);
 router.post("/workspace/flowchart/:roomId/save", verifyToken, discussionController.saveFlowchart);
 router.get("/workspace/:roomId", verifyToken, discussionController.getWorkspace);
+router.post("/workspace/:roomId/validate", verifyToken, discussionController.validateWorkspace);
 
 // ================= TASK =================
 router.get("/task/:roomId", verifyToken, discussionController.getTaskProgress);

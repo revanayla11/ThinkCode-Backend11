@@ -68,6 +68,9 @@ router.put("/:id/orientasi", verifyToken, isAdmin, ctrl.putOrientasi);
 router.post("/:id/orientasi/upload", verifyToken, isAdmin, upload.single("file"), ctrl.uploadOrientasi);
 router.delete("/:id/orientasi", verifyToken, isAdmin, ctrl.deleteOrientasi);
 
+// === ANSWER / JAWABAN MATERI ===
+router.get("/:id/answer", verifyToken, isAdmin, ctrl.getMateriAnswerById);
+router.post("/:id/answer", verifyToken, isAdmin, ctrl.saveMateriAnswer);
 
 
 module.exports = router;

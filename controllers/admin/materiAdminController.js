@@ -1,4 +1,4 @@
-const { Materi, MateriSection, Clue, DiscussionRoom, Upload } = require("../../models");
+const { Materi, MateriSection, Clue, DiscussionRoom, Upload, MateriAnswer } = require("../../models");
 const fs = require("fs");
 const path = require("path");
 
@@ -145,7 +145,7 @@ exports.createClue = async (req,res)=> {
   console.log("BODY CREATE CLUE:", req.body);   
 
   const count = await Clue.count({ where:{ materiId: req.params.id }});
-  if(count >= 5) return res.status(400).json({error:"Maximum clues reached"});
+  if(count >= 3) return res.status(400).json({error:"Maximum clues reached"});
 
   const c = await Clue.create({ 
     clueText: req.body.clueText,                
@@ -225,4 +225,45 @@ exports.deleteUpload = async (req,res)=> {
   if(!u) return res.status(404).json({error:"Not found"});
   await u.destroy();
   res.json({ success:true });
+};
+
+// GET Jawaban materi berdasarkan materiId
+exports.getMateriAnswerById = async (req, res) => {
+  try {
+    const materiId = req.params.id;
+    const answer = await MateriAnswer.findOne({
+      where: { materiId }
+    });
+    res.json(answer || {});
+  } catch (err) {
+    console.error('Get Materi Answer Error:', err);
+    res.status(500).json({ error: 'Failed to get answer' });
+  }
+};
+
+// POST/PUT Jawaban materi
+exports.saveMateriAnswer = async (req, res) => {
+  try {
+    const materiId = req.params.id;
+    const { pseudocode, flowchart } = req.body;
+
+    let answer = await MateriAnswer.findOne({ where: { materiId } });
+
+    if (answer) {
+      // Update existing
+      await answer.update({ pseudocode, flowchart });
+    } else {
+      // Create new
+      answer = await MateriAnswer.create({
+        materiId,
+        pseudocode,
+        flowchart
+      });
+    }
+
+    res.json(answer);
+  } catch (err) {
+    console.error('Save Materi Answer Error:', err);
+    res.status(500).json({ error: 'Failed to save answer' });
+  }
 };
