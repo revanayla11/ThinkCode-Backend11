@@ -46,21 +46,21 @@ exports.listRoomsByMateri = async (req, res) => {
 exports.roomMembers = async (req, res) => {
   try {
     console.log(`👥 Members roomId: ${req.params.roomId}`);
-    const roomId = parseInt(req.params.roomId); // ✅ Parse int
+    const roomId = parseInt(req.params.roomId);
     
     const members = await sequelize.query(
       `SELECT rm.id, rm.user_id, COALESCE(u.name, CONCAT('User ', rm.user_id)) AS name
        FROM room_members rm
        LEFT JOIN users u ON u.id = rm.user_id
        WHERE rm.room_id = ?
-       ORDER BY rm.created_at DESC`,
+       ORDER BY rm.id DESC`,  // ✅ ORDER BY id (karena timestamps: false)
       { 
         replacements: [roomId], 
         type: sequelize.QueryTypes.SELECT 
       }
     );
 
-    console.log(`✅ Members: ${members.length}`);
+    console.log(`✅ Members loaded: ${members.length}`);
     res.json({ status: true, data: members });
   } catch (err) {
     console.error(`❌ Members ERROR:`, err.message);
