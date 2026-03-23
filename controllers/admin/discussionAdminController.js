@@ -45,20 +45,26 @@ exports.listRoomsByMateri = async (req, res) => {
 
 exports.roomMembers = async (req, res) => {
   try {
-    const roomId = req.params.roomId;
-
+    console.log(`👥 Members roomId: ${req.params.roomId}`);
+    const roomId = parseInt(req.params.roomId); // ✅ Parse int
+    
     const members = await sequelize.query(
-      `SELECT rm.id, rm.user_id, u.name
+      `SELECT rm.id, rm.user_id, COALESCE(u.name, CONCAT('User ', rm.user_id)) AS name
        FROM room_members rm
        LEFT JOIN users u ON u.id = rm.user_id
-       WHERE rm.room_id = ?`,
-      { replacements: [roomId], type: sequelize.QueryTypes.SELECT }
+       WHERE rm.room_id = ?
+       ORDER BY rm.created_at DESC`,
+      { 
+        replacements: [roomId], 
+        type: sequelize.QueryTypes.SELECT 
+      }
     );
 
-    return res.json({ status: true, data: members });
+    console.log(`✅ Members: ${members.length}`);
+    res.json({ status: true, data: members });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ status: false, message: "Server error" });
+    console.error(`❌ Members ERROR:`, err.message);
+    res.status(500).json({ status: false, message: "Failed to load members" });
   }
 };
 
@@ -82,7 +88,9 @@ exports.roomClues = async (req, res) => {
 exports.roomDetail = async (req, res) => {
   try {
     const roomId = req.params.roomId;
+    console.log(`👁️ Loading room detail: ${roomId}`);
 
+    // 1. Get room info
     const roomRows = await sequelize.query(
       `SELECT id, materi_id, room_name, max_members, IFNULL(is_closed,0) AS is_closed
        FROM discussion_rooms
@@ -92,39 +100,63 @@ exports.roomDetail = async (req, res) => {
     );
 
     const room = roomRows[0];
-    if (!room) return res.status(404).json({ status: false, message: "Room not found" });
+    if (!room) {
+      return res.status(404).json({ status: false, message: "Room not found" });
+    }
 
+    // 2. Get recent messages
     const messages = await sequelize.query(
-      `SELECT dm.id, dm.userId AS user_id, u.name AS sender_name, dm.message, dm.createdAt AS timestamp
+      `SELECT dm.id, dm.userId AS user_id, u.name AS sender_name, 
+              dm.message, dm.createdAt AS timestamp
        FROM discussion_messages dm
        LEFT JOIN users u ON u.id = dm.userId
        WHERE dm.roomId = ?
        ORDER BY dm.createdAt ASC
-       LIMIT 1000`,
+       LIMIT 50`,  // Reduced limit
       { replacements: [roomId], type: sequelize.QueryTypes.SELECT }
     );
 
-    // Perbaiki hitungan clue: gunakan DiscussionClueLog.count
-    const used = await DiscussionClueLog.count({ where: { roomId } });
-    console.log(`DEBUG: Clue used for room ${roomId}: ${used}`); // Tambah log untuk debug
-    const maxClue = 3; // Sesuaikan dengan siswa
+    // 3. Clue usage
+    const usedClues = await DiscussionClueLog.count({ where: { roomId } });
+    const maxClues = 3;
 
-    const materiAnswerRes = await this.getMateriAnswer(req, res);
-    const materiAnswer = materiAnswerRes ? materiAnswerRes.data : null;
+    // 4. MateriAnswer - FIX INDEPENDENT CALL (NO 'this')
+    let materiAnswer = null;
+    try {
+      const roomMateri = await sequelize.query(
+        `SELECT materi_id FROM discussion_rooms WHERE id = ? LIMIT 1`,
+        { replacements: [roomId], type: sequelize.QueryTypes.SELECT }
+      );
+      
+      if (roomMateri.length > 0) {
+        const materiId = roomMateri[0].materi_id;
+        materiAnswer = await MateriAnswer.findOne({ where: { materiId } });
+        console.log(`📚 MateriAnswer for ${materiId}:`, materiAnswer ? 'Found' : 'Not found');
+      }
+    } catch (answerErr) {
+      console.error('❌ MateriAnswer error:', answerErr);
+      materiAnswer = null;
+    }
+
+    console.log(`✅ RoomDetail complete: room=${room.id}, messages=${messages.length}, clues=${usedClues}/${maxClues}`);
 
     return res.json({
       status: true,
       data: {
         room,
         messages,
-        clue: { used, max: maxClue },
-        materiAnswer
+        clue: { used: usedClues, max: maxClues },
+        materiAnswer: materiAnswer || null  // ✅ SAFE null
       }
     });
 
   } catch (err) {
-    console.error("roomDetail error:", err);
-    return res.status(500).json({ status: false, message: "Server error" });
+    console.error(`💥 roomDetail CRASH roomId=${req.params.roomId}:`, err);
+    return res.status(500).json({ 
+      status: false, 
+      message: "Server error", 
+      error: err.message 
+    });
   }
 };
 
