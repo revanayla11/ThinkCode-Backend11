@@ -256,23 +256,43 @@ exports.workspaceLatest = async (req, res) => {
     
     const workspace = await Workspace.findOne({
       where: { roomId },
-      order: [['createdAt', 'DESC']] // Pastikan latest
+      order: [['createdAt', 'DESC']]
     });
 
     if (workspace) {
-      // Format flowchart JSON
+      let formattedFlowchart = null;
+      
+      try {
+        // ✅ SAFE JSON PARSE
+        if (workspace.flowchart) {
+          if (typeof workspace.flowchart === 'string') {
+            formattedFlowchart = JSON.parse(workspace.flowchart);
+          } else if (typeof workspace.flowchart === 'object') {
+            formattedFlowchart = workspace.flowchart; // Sudah object
+          }
+        }
+      } catch (parseErr) {
+        console.error("❌ Flowchart parse error:", parseErr.message);
+        formattedFlowchart = null; // Skip kalau corrupt
+      }
+
       const formatted = {
         ...workspace.toJSON(),
-        flowchart: workspace.flowchart ? JSON.parse(workspace.flowchart) : null
+        flowchart: formattedFlowchart
       };
-      console.log("✅ Latest workspace found:", formatted.pseudocode ? 'YES' : 'NO');
+      
+      console.log("✅ Latest workspace:", {
+        hasPseudocode: !!formatted.pseudocode,
+        hasFlowchart: !!formattedFlowchart
+      });
+      
       return res.json({ status: true, data: formatted });
     }
 
-    console.log("❌ No workspace found");
+    console.log("📭 No workspace found");
     return res.json({ status: true, data: null });
   } catch (err) {
-    console.error("❌ workspaceLatest ERROR:", err);
+    console.error("💥 workspaceLatest CRASH:", err.message);
     return res.status(500).json({ status: false, message: "Server error" });
   }
 };
@@ -287,33 +307,41 @@ exports.workspaceAttempts = async (req, res) => {
       order: [["attemptNumber", "ASC"], ["createdAt", "ASC"]]
     });
 
-    console.log(`📈 Raw attempts: ${attempts.length}`);
-
-    // ✅ FORMAT DATA untuk frontend
-    const formattedAttempts = attempts.map(attempt => ({
-      id: attempt.id,
-      roomId: attempt.roomId,
-      type: attempt.type, // 'pseudocode' atau 'flowchart'
-      attemptNumber: attempt.attemptNumber,
-      content: attempt.content || null,
-      success: attempt.success || false, // Tambah field ini
-      createdAt: attempt.createdAt,
+    const formattedAttempts = attempts.map(attempt => {
+      let parsedFlowchart = null;
       
-      // 🆕 MAP ke format yang diharapkan frontend
-      pseudocode: attempt.type === 'pseudocode' ? attempt.content : null,
-      flowchart: attempt.type === 'flowchart' ? 
-        (attempt.content ? JSON.parse(attempt.content) : null) : null
-    }));
+      // ✅ SAFE JSON PARSE untuk flowchart
+      if (attempt.type === 'flowchart' && attempt.content) {
+        try {
+          if (typeof attempt.content === 'string') {
+            parsedFlowchart = JSON.parse(attempt.content);
+          } else {
+            parsedFlowchart = attempt.content;
+          }
+        } catch (parseErr) {
+          console.error(`❌ Parse flowchart attempt ${attempt.id}:`, parseErr.message);
+          parsedFlowchart = null;
+        }
+      }
 
-    console.log(`✅ Formatted attempts: ${formattedAttempts.length}`);
-    console.log("Sample:", formattedAttempts[0]);
-
-    return res.json({ 
-      status: true, 
-      data: formattedAttempts 
+      return {
+        id: attempt.id,
+        roomId: attempt.roomId,
+        type: attempt.type,
+        attemptNumber: attempt.attemptNumber,
+        content: attempt.content || null,
+        success: attempt.success || false,
+        createdAt: attempt.createdAt,
+        // Format untuk frontend
+        pseudocode: attempt.type === 'pseudocode' ? attempt.content : null,
+        flowchart: parsedFlowchart
+      };
     });
+
+    console.log(`✅ Formatted ${formattedAttempts.length} attempts`);
+    return res.json({ status: true, data: formattedAttempts });
   } catch (err) {
-    console.error("❌ workspaceAttempts ERROR:", err);
+    console.error("💥 workspaceAttempts CRASH:", err);
     return res.status(500).json({ status: false, message: "Server error" });
   }
 };
