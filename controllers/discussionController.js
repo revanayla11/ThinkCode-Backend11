@@ -38,44 +38,68 @@ exports.getRoomPerformance = async (req, res) => {
   try {
     const { roomId } = req.params;
 
-    // 1️⃣ Hitung clue used (pakai DiscussionClueLog)
+    // 1️⃣ Hitung clue used (DiscussionClueLog)
     const usedClues = await DiscussionClueLog.count({
       where: { roomId }
     });
 
     // 2️⃣ Hitung total attempt (pseudocode + flowchart)
-    const attempts = await WorkspaceAttempt.count({
-      where: { roomId }
+    const pseudoAttempts = await WorkspaceAttempt.count({
+      where: { roomId, type: "pseudocode" }
     });
+    const flowchartAttempts = await WorkspaceAttempt.count({
+      where: { roomId, type: "flowchart" }
+    });
+    const totalAttempts = pseudoAttempts + flowchartAttempts;
 
     // 3️⃣ Cek apakah semua task selesai
     const tasks = await RoomTaskProgress.findAll({
       where: { roomId }
     });
+    const allDone = tasks.length === 5 && tasks.every(t => t.done);
 
-    const allDone =
-      tasks.length === 5 &&
-      tasks.every(t => t.done);
-
-    // 4️⃣ Hitung score
+    // 4️⃣ Hitung score - ✅ LOGIKA BARU
     let score = 100;
 
+    // Penalty clue: -10 per clue (max 3 clues = -30)
     score -= usedClues * 10;
-    score -= attempts * 5;
+    
+    // Penalty attempt: -5 per attempt di atas 3 kali total
+    const attemptsAbove3 = Math.max(0, totalAttempts - 3);
+    score -= attemptsAbove3 * 5;
+    
+    // Penalty task belum selesai: -20
     if (!allDone) score -= 20;
 
     if (score < 0) score = 0;
 
-    res.json({
-      score,
+    console.log(`📊 Performance room ${roomId}:`, {
       usedClues,
-      attempts,
-      allDone
+      pseudoAttempts,
+      flowchartAttempts,
+      totalAttempts,
+      attemptsAbove3,
+      allDone,
+      score
+    });
+
+    res.json({
+      score: Math.round(score),
+      usedClues,
+      pseudoAttempts,
+      flowchartAttempts,
+      totalAttempts,
+      allDone,
+      breakdown: {
+        cluePenalty: usedClues * 10,
+        attemptPenalty: attemptsAbove3 * 5,
+        taskPenalty: allDone ? 0 : 20
+      }
     });
 
   } catch (error) {
     console.error("Error getRoomPerformance:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", score: 0 });
   }
 };
 
