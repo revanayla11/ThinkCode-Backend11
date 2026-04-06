@@ -5,14 +5,14 @@ const cors = require("cors");
 const path = require("path");
 const sequelize = require("./config/db");
 const dashboardRoutes = require("./routes/dashboardRoutes");
-
+const models = require("./models"); 
 const db = {};
 
 
 
 console.log("JWT SECRET:", process.env.JWT_SECRET);
 
-const models = require("./models"); 
+
 const app = express();
 const server = http.createServer(app);
 
@@ -123,33 +123,7 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log("✅ Database connected");
 
-// parent tables dulu
-await models.User.sync({ alter: true });
-await models.Materi.sync({ alter: true });
-await models.DiscussionRoom.sync({ alter: true });
-await models.Badge.sync({ alter: true });
-
-
-// baru yang tergantung FK
-await models.Workspace.sync({ alter: true });
-await models.UserMateriProgress.sync({ alter: true });
-await models.DiscussionMessage.sync({ alter: true });
-await models.WorkspaceAttempt.sync({ alter: true });
-await models.RoomTaskProgress.sync({ alter: true });
-await models.Submission.sync({ alter: true });
-await models.Clue.sync({ alter: true });
-await models.DiscussionClueLog.sync({ alter: true });
-db.GameLevel = require("./GameLevel")(sequelize, Sequelize.DataTypes);
-db.GameQuestion = require("./GameQuestion")(sequelize, Sequelize.DataTypes);
-await models.GameLevel.sync({ alter: true });
-await models.GameQuestion.sync({ alter: true });
-await models.UserProgress.sync({ alter: true });
-await models.UserBadge.sync({ alter: true });
-await models.TeacherFeedback.sync({ alter: true });
-await models.MateriSection.sync({ alter: true });
-await models.MateriAnswer.sync({ alter: true });
-await models.RoomMember.sync({ alter: true });
-
+    await models.sequelize.sync({ alter: true });
 
     // Start server setelah semua tabel siap
     server.listen(PORT, "0.0.0.0", () => {
