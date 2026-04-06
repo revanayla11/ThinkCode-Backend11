@@ -45,10 +45,6 @@ User.hasMany(DiscussionMessage, { foreignKey: "userId" });
 DiscussionMessage.belongsTo(User, { foreignKey: "userId" });
 
 
-GameLevel.belongsTo(Badge, {
-  foreignKey: "reward_badge_id",
-});
-
 User.belongsToMany(Badge, {
   through: UserBadge,
   foreignKey: "user_id",
