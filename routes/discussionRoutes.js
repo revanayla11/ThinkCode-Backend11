@@ -48,4 +48,53 @@ router.get(
 // Tambahkan untuk XP (jika belum ada)
 router.get("/user-xp/:materiId", verifyToken, discussionController.getUserXp);
 
+// ================= TAMBAH INI DI AKHIR SEBELUM module.exports =================
+
+// 1. TIMER (Mock - bisa diganti real nanti)
+router.get("/timer/:roomId/check", verifyToken, (req, res) => {
+  res.json({ 
+    timeLeft: 3600, 
+    penaltyXP: 0, 
+    overtimeMinutes: 0 
+  });
+});
+
+router.post("/room/:roomId/timer/start", verifyToken, (req, res) => {
+  res.json({ success: true });
+});
+
+// 2. TEMPLATE (Pakai mini lesson)
+router.get("/template/:roomId", verifyToken, async (req, res) => {
+  try {
+    const miniRes = await discussionController.getMiniLesson(req, res, req.params.roomId);
+    res.json({
+      data: {
+        template: miniRes.pseudocode || "IF (___BLANK_0___) THEN ___BLANK_1___ ENDIF",
+        blanks: [
+          { hint: "condition seperti x > 0" },
+          { hint: "print 'Positif'" },
+          { hint: "print 'Negatif'" }
+        ],
+        materiType: "IF-ELSE"
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Template not found" });
+  }
+});
+
+// 3. CLUES (Gabung getClues + getUsedClues)
+router.get("/room/:roomId/clues", verifyToken, async (req, res) => {
+  try {
+    const allClues = await discussionController.getClues(req, res, req.params.roomId);
+    const usedClues = await discussionController.getUsedClues(req, res, req.params.roomId);
+    res.json({
+      clues: allClues,
+      used: usedClues
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Clues error" });
+  }
+});
+
 module.exports = router;
