@@ -87,25 +87,16 @@ exports.deleteMateri = async (req, res) => {
 };
 
 // ================= GET DETAIL MATERI (PERBAIKAN LENGKAP) =================
+// ================= GET DETAIL MATERI (SAFE VERSION) =================
 exports.getMateriDetail = async (req, res) => {
   try {
-    const id = req.params.id;
+    const id = parseInt(req.params.id);
     const userId = req.user?.id;
 
-    const materi = await Materi.findByPk(id, {
-      include: [
-        {
-          model: MateriSection,
-          as: 'sections',
-          order: [['order', 'ASC']]
-        },
-        {
-          model: Clue,
-          order: [['id', 'ASC']]
-        }
-      ]
-    });
+    console.log(`🔍 Get materi ${id} for user ${userId || 'guest'}`);
 
+    // 1. Get materi dasar
+    const materi = await Materi.findByPk(id);
     if (!materi) {
       return res.status(404).json({ 
         status: false, 
@@ -113,58 +104,83 @@ exports.getMateriDetail = async (req, res) => {
       });
     }
 
-    // Filter sections untuk frontend
-    const sections = materi.sections.map(s => ({
-      id: s.id,
-      type: s.type,
-      content: s.content,
-      title: s.title,
-      order: s.order
-    }));
+    // 2. Get sections TERPISAH (SAFE)
+    const sections = await MateriSection.findAll({
+      where: { materiId: id },
+      order: [["order", "ASC"]]
+    });
 
+    // 3. Get clues TERPISAH (SAFE)
+    const clues = await Clue.findAll({
+      where: { materiId: id },
+      order: [["id", "ASC"]]
+    });
+
+    // 4. Filter untuk frontend
     const videoSection = sections.find(s => s.type === "video" && s.content);
     const miniSection = sections.find(s => s.type === "mini");
 
+    // 5. Get progress jika user login
     let progress = null;
     if (userId) {
-      const up = await UserMateriProgress.findOne({ 
-        where: { userId, materiId: id } 
-      });
-      
-      progress = up ? {
-        completedSections: JSON.parse(up.completedSections || '[]'),
-        percent: up.percent || 0,
-        xp: up.xp || 0
-      } : { 
-        completedSections: [], 
-        percent: 0, 
-        xp: 0 
-      };
+      try {
+        const up = await UserMateriProgress.findOne({ 
+          where: { userId, materiId: id } 
+        });
+        
+        progress = up ? {
+          completedSections: JSON.parse(up.completedSections || '[]'),
+          percent: up.percent || 0,
+          xp: up.xp || 0
+        } : { 
+          completedSections: [], 
+          percent: 0, 
+          xp: 0 
+        };
+      } catch (progressErr) {
+        console.error("Progress error:", progressErr);
+        progress = { completedSections: [], percent: 0, xp: 0 };
+      }
     }
 
+    // Response
     res.json({
       status: true,
       data: {
         materi: {
           id: materi.id,
           title: materi.title,
-          description: materi.description
+          description: materi.description || ""
         },
-        sections,
-        videoSection,
+        sections: sections.map(s => ({
+          id: s.id,
+          type: s.type,
+          content: s.content,
+          title: s.title,
+          order: s.order
+        })),
+        videoSection: videoSection ? {
+          id: videoSection.id,
+          type: videoSection.type,
+          content: videoSection.content,
+          title: videoSection.title
+        } : null,
         miniLesson: miniSection ? {
           type: miniSection.type,
           content: miniSection.content,
           title: miniSection.title
         } : null,
-        clues: materi.Clues || [],
+        clues,
         progress
       }
     });
 
   } catch (err) {
-    console.error('Get Materi Detail Error:', err);
-    res.status(500).json({ status: false, message: "Server error" });
+    console.error('🚨 Get Materi Detail FULL ERROR:', err);
+    res.status(500).json({ 
+      status: false, 
+      message: "Server error: " + err.message 
+    });
   }
 };
 
