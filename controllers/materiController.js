@@ -92,13 +92,21 @@ exports.getMateriDetail = async (req, res) => {
         completedSections: userProgress
           ? JSON.parse(userProgress.completedSections || "[]")
           : [],
-        completedSteps: userProgress
-          ? JSON.parse(userProgress.questSteps || "[]")
-          : [],
+        completedSteps: (() => {
+          try {
+            return userProgress?.questSteps
+              ? JSON.parse(userProgress.questSteps)
+              : [];
+          } catch {
+            return [];
+          }
+        })(),
+        
         materiXP: userProgress?.xp || 0,
         userXP: user?.xp || 0
       };
     }
+    console.log("DB questSteps:", userProgress?.questSteps);
 
     res.json({
       status: true,
