@@ -21,7 +21,6 @@ const RoomTaskProgress = require("./RoomTaskProgress");
 const Submission = require("./Submission");
 const UserProgress = require("./UserProgress");
 const TeacherFeedback = require("./TeacherFeedback");
-db.sequelize = sequelize; 
 
 MateriSection.belongsTo(Materi, { foreignKey: "materiId" });
 DiscussionRoom.belongsTo(Materi, { foreignKey: "materiId" });
