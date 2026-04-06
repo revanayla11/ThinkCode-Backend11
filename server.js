@@ -6,6 +6,9 @@ const path = require("path");
 const sequelize = require("./config/db");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 
+const db = {};
+
+
 
 console.log("JWT SECRET:", process.env.JWT_SECRET);
 
@@ -136,6 +139,8 @@ await models.RoomTaskProgress.sync({ alter: true });
 await models.Submission.sync({ alter: true });
 await models.Clue.sync({ alter: true });
 await models.DiscussionClueLog.sync({ alter: true });
+db.GameLevel = require("./GameLevel")(sequelize, Sequelize.DataTypes);
+db.GameQuestion = require("./GameQuestion")(sequelize, Sequelize.DataTypes);
 await models.GameLevel.sync({ alter: true });
 await models.GameQuestion.sync({ alter: true });
 await models.UserProgress.sync({ alter: true });
