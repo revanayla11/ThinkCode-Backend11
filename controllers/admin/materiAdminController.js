@@ -1,6 +1,15 @@
-const { Materi, MateriSection, Clue, DiscussionRoom, Upload, MateriAnswer } = require("../../models");
+const { Materi, MateriSection, UserMateriProgress, Clue, DiscussionRoom, Upload, MateriAnswer } = require("../../models");
 const fs = require("fs");
 const path = require("path");
+
+const STEPS = ["watch_video", "open_mini_lesson", "join_discussion", "submit_answer"];
+
+const XP_MAP = {
+  watch_video: 10,
+  open_mini_lesson: 15,
+  join_discussion: 20,
+  submit_answer: 50
+};
 
 // materi
 exports.listMateri = async (req,res) => {
@@ -326,5 +335,79 @@ exports.saveMateriAnswer = async (req, res) => {
   } catch (err) {
     console.error('Save Materi Answer Error:', err);
     res.status(500).json({ error: 'Failed to save answer' });
+  }
+};
+
+// ================= 🎮 COMPLETE STEP (GAMIFIKASI) =================
+exports.completeStep = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const materiId = parseInt(req.params.id);
+    const { step } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!STEPS.includes(step)) {
+      return res.status(400).json({ error: "Invalid step" });
+    }
+
+    let progress = await UserMateriProgress.findOne({
+      where: { userId, materiId }
+    });
+
+    if (!progress) {
+      progress = await UserMateriProgress.create({
+        userId,
+        materiId,
+        completedSections: JSON.stringify([]),
+        percent: 0,
+        xp: 0
+      });
+    }
+
+    let completedSteps = JSON.parse(progress.completedSections);
+
+    // bersihin data
+    completedSteps = completedSteps.filter(s => STEPS.includes(s));
+
+    let xp = progress.xp || 0;
+
+    // 🔒 VALIDASI (tidak bisa lompat step)
+    if (step === "join_discussion" && !completedSteps.includes("watch_video")) {
+      return res.status(400).json({
+        error: "Harus nonton video dulu"
+      });
+    }
+
+    // 🆕 tambah step + XP
+    if (!completedSteps.includes(step)) {
+      completedSteps.push(step);
+      xp += XP_MAP[step] || 0;
+    }
+
+    const percentRaw = Math.round(
+      (completedSteps.length / STEPS.length) * 100
+    );
+
+    const percent = Math.min(percentRaw, 100);
+
+    await progress.update({
+      completedSections: JSON.stringify(completedSteps),
+      percent,
+      xp
+    });
+
+    res.json({
+      success: true,
+      percent,
+      completedSteps,
+      xp
+    });
+
+  } catch (err) {
+    console.error("Complete Step Error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 };
