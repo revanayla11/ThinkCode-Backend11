@@ -21,6 +21,7 @@ const RoomTaskProgress = require("./RoomTaskProgress");
 const Submission = require("./Submission");
 const UserProgress = require("./UserProgress");
 const TeacherFeedback = require("./TeacherFeedback");
+const MateriSection = require("./MateriSection");
 
 MateriSection.belongsTo(Materi, { foreignKey: "materiId" });
 DiscussionRoom.belongsTo(Materi, { foreignKey: "materiId" });
@@ -80,7 +81,7 @@ Materi.hasMany(DiscussionRoom, { foreignKey: "materiId", as: "rooms" });
 UserBadge.belongsTo(Badge, { foreignKey: "badge_id" });
 
 Materi.hasMany(UserMateriProgress, { foreignKey: "materiId" });
-Materi.hasMany(models.MateriSection, { foreignKey: 'materiId', as: 'sections'});
+Materi.hasMany(MateriSection, { foreignKey: 'materiId', as: 'sections'});
 
 DiscussionClueLog.belongsTo(Clue, { foreignKey: "clueId" });
 DiscussionClueLog.belongsTo(User, { foreignKey: "takenBy" });
