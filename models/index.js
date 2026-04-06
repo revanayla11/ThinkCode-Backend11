@@ -1,105 +1,132 @@
-const Sequelize = require("sequelize");
-const sequelize = require("../config/db");
+const User = require("./User");
+const Materi = require("./Materi");
+const MateriAnswer = require("./MateriAnswer");
+const MateriSection = require("./MateriSection");
+const UserMateriProgress = require("./UserMateriProgress");
+const DiscussionRoom = require("./DiscussionRoom");
+const DiscussionMessage = require("./DiscussionMessage");
+const Upload = require("./Upload");
+const LeaderboardIndividu = require("./LeaderboardIndividu");
+const LeaderboardKelompok = require("./LeaderboardKelompok");
+const Badge = require("./Badge");
+const GameLevel = require("./GameLevel");
+const GameQuestion = require("./GameQuestion");
+const UserBadge = require("./UserBadge");
+const Clue = require("./Clue");
+const DiscussionClueLog = require("./DiscussionClueLog");
+const RoomMember = require("./RoomMember");
+const Workspace = require("./Workspace");
+const WorkspaceAttempt = require("./WorkspaceAttempt");
+const RoomTaskProgress = require("./RoomTaskProgress");
+const Submission = require("./Submission");
+const UserProgress = require("./UserProgress");
+const TeacherFeedback = require("./TeacherFeedback");
 
-const db = {};
+MateriSection.belongsTo(Materi, { foreignKey: "materiId" });
+DiscussionRoom.belongsTo(Materi, { foreignKey: "materiId" });
 
-// ================= INIT MODELS ================= //
-db.User = require("./User")(sequelize, Sequelize.DataTypes);
-db.Materi = require("./Materi")(sequelize, Sequelize.DataTypes);
-db.MateriAnswer = require("./MateriAnswer")(sequelize, Sequelize.DataTypes);
-db.MateriSection = require("./MateriSection")(sequelize, Sequelize.DataTypes);
-db.UserMateriProgress = require("./UserMateriProgress")(sequelize, Sequelize.DataTypes);
-db.DiscussionRoom = require("./DiscussionRoom")(sequelize, Sequelize.DataTypes);
-db.DiscussionMessage = require("./DiscussionMessage")(sequelize, Sequelize.DataTypes);
-db.Upload = require("./Upload")(sequelize, Sequelize.DataTypes);
-db.LeaderboardIndividu = require("./LeaderboardIndividu")(sequelize, Sequelize.DataTypes);
-db.LeaderboardKelompok = require("./LeaderboardKelompok")(sequelize, Sequelize.DataTypes);
-db.Badge = require("./Badge")(sequelize, Sequelize.DataTypes);
-db.GameLevel = require("./GameLevel")(sequelize, Sequelize.DataTypes);
-db.GameQuestion = require("./GameQuestion")(sequelize, Sequelize.DataTypes);
-db.UserBadge = require("./UserBadge")(sequelize, Sequelize.DataTypes);
-db.Clue = require("./Clue")(sequelize, Sequelize.DataTypes);
-db.DiscussionClueLog = require("./DiscussionClueLog")(sequelize, Sequelize.DataTypes);
-db.RoomMember = require("./RoomMember")(sequelize, Sequelize.DataTypes);
-db.Workspace = require("./Workspace")(sequelize, Sequelize.DataTypes);
-db.WorkspaceAttempt = require("./WorkspaceAttempt")(sequelize, Sequelize.DataTypes);
-db.RoomTaskProgress = require("./RoomTaskProgress")(sequelize, Sequelize.DataTypes);
-db.Submission = require("./Submission")(sequelize, Sequelize.DataTypes);
-db.UserProgress = require("./UserProgress")(sequelize, Sequelize.DataTypes);
-db.TeacherFeedback = require("./TeacherFeedback")(sequelize, Sequelize.DataTypes);
+DiscussionMessage.belongsTo(DiscussionRoom, { foreignKey: "roomId" });
+DiscussionMessage.belongsTo(User, { foreignKey: "userId" });
 
-// ================= RUN ASSOCIATIONS ================= //
-Object.keys(db).forEach((modelName) => {
-  if (db[modelName].associate) {
-    db[modelName].associate(db);
-  }
+UserMateriProgress.belongsTo(User, { foreignKey: "userId" });
+UserMateriProgress.belongsTo(Materi, { foreignKey: "materiId" });
+
+Upload.belongsTo(User, { foreignKey: "userId" });
+Upload.belongsTo(Materi, { foreignKey: "materiId" });
+Upload.belongsTo(MateriSection, { foreignKey: "sectionId" });
+
+Clue.belongsTo(Materi, { foreignKey:"materiId" });
+
+
+DiscussionRoom.hasMany(DiscussionMessage, { foreignKey: "roomId" });
+DiscussionMessage.belongsTo(DiscussionRoom, { foreignKey: "roomId" });
+
+User.hasMany(DiscussionMessage, { foreignKey: "userId" });
+DiscussionMessage.belongsTo(User, { foreignKey: "userId" });
+
+
+GameLevel.belongsTo(Badge, {
+  foreignKey: "reward_badge_id",
 });
 
-// ================= TAMBAHAN RELASI (JIKA TIDAK DI MODEL) ================= //
-
-// Many-to-many User <-> Badge
-db.User.belongsToMany(db.Badge, {
-  through: db.UserBadge,
+User.belongsToMany(Badge, {
+  through: UserBadge,
   foreignKey: "user_id",
 });
-db.Badge.belongsToMany(db.User, {
-  through: db.UserBadge,
+
+Badge.belongsToMany(User, {
+  through: UserBadge,
   foreignKey: "badge_id",
 });
 
-// Discussion Room relations
-db.DiscussionRoom.belongsToMany(db.User, {
+DiscussionRoom.belongsToMany(User, {
   through: "discussion_room_users",
   foreignKey: "roomId",
 });
-db.User.belongsToMany(db.DiscussionRoom, {
+User.belongsToMany(DiscussionRoom, {
   through: "discussion_room_users",
   foreignKey: "userId",
 });
 
-// RoomMember
-db.RoomMember.belongsTo(db.User, { foreignKey: "user_id", as: "user" });
-db.User.hasMany(db.RoomMember, { foreignKey: "user_id", as: "roomMembers" });
+RoomMember.belongsTo(User, { foreignKey: "user_id", as: "user" });
+User.hasMany(RoomMember, { foreignKey: "user_id", as: "roomMembers" });
 
-db.RoomMember.belongsTo(db.DiscussionRoom, { foreignKey: "room_id", as: "room" });
-db.DiscussionRoom.hasMany(db.RoomMember, { foreignKey: "room_id", as: "members" });
+RoomMember.belongsTo(DiscussionRoom, { foreignKey: "room_id", as: "room" });
+DiscussionRoom.hasMany(RoomMember, { foreignKey: "room_id", as: "members" });
 
-// Materi relations
-db.Materi.hasMany(db.MateriSection, { foreignKey: "materiId", as: "sections" });
-db.Materi.hasOne(db.MateriAnswer, { foreignKey: "materiId", as: "answer" });
-db.MateriAnswer.belongsTo(db.Materi, { foreignKey: "materiId", as: "materi" });
+DiscussionRoom.belongsTo(Materi, { foreignKey: "materiId", as: "materi" });
+Materi.hasMany(DiscussionRoom, { foreignKey: "materiId", as: "rooms" });
 
-// Discussion Clue Log
-db.DiscussionClueLog.belongsTo(db.Clue, { foreignKey: "clueId" });
-db.DiscussionClueLog.belongsTo(db.User, { foreignKey: "takenBy" });
+UserBadge.belongsTo(Badge, { foreignKey: "badge_id" });
 
-db.DiscussionClueLog.belongsTo(db.DiscussionRoom, { foreignKey: "roomId", as: "room" });
-db.DiscussionRoom.hasMany(db.DiscussionClueLog, { foreignKey: "roomId", as: "clueLogs" });
+Materi.hasMany(UserMateriProgress, { foreignKey: "materiId" });
+Materi.hasMany(MateriSection, { foreignKey: 'materiId', as: 'sections'});
 
-// Workspace
-db.Workspace.belongsTo(db.DiscussionRoom, { foreignKey: "roomId", as: "room" });
-db.DiscussionRoom.hasOne(db.Workspace, { foreignKey: "roomId", as: "workspace" });
+DiscussionClueLog.belongsTo(Clue, { foreignKey: "clueId" });
+DiscussionClueLog.belongsTo(User, { foreignKey: "takenBy" });
 
-// Workspace Attempt
-db.WorkspaceAttempt.belongsTo(db.DiscussionRoom, { foreignKey: "roomId", as: "room" });
-db.DiscussionRoom.hasMany(db.WorkspaceAttempt, { foreignKey: "roomId", as: "attempts" });
+UserMateriProgress.belongsTo(DiscussionRoom, { foreignKey: "roomId", as: "room" });
+DiscussionRoom.hasMany(UserMateriProgress, { foreignKey: "roomId", as: "progresses" });
 
-// Task Progress
-db.RoomTaskProgress.belongsTo(db.DiscussionRoom, { foreignKey: "roomId", as: "room" });
-db.DiscussionRoom.hasMany(db.RoomTaskProgress, { foreignKey: "roomId", as: "tasks" });
+DiscussionClueLog.belongsTo(DiscussionRoom, { foreignKey: "roomId", as: "room" });
+DiscussionRoom.hasMany(DiscussionClueLog, { foreignKey: "roomId", as: "clueLogs" });
 
-// UserMateriProgress ↔ Room
-db.UserMateriProgress.belongsTo(db.DiscussionRoom, {
-  foreignKey: "roomId",
-  as: "room",
-});
-db.DiscussionRoom.hasMany(db.UserMateriProgress, {
-  foreignKey: "roomId",
-  as: "progresses",
-});
+Workspace.belongsTo(DiscussionRoom, { foreignKey: "roomId", as: "room" });
+DiscussionRoom.hasOne(Workspace, { foreignKey: "roomId", as: "workspace" });
 
-// ================= EXPORT ================= //
-db.sequelize = sequelize;
-db.Sequelize = Sequelize;
+WorkspaceAttempt.belongsTo(DiscussionRoom, { foreignKey: "roomId", as: "room" });
+DiscussionRoom.hasMany(WorkspaceAttempt, { foreignKey: "roomId", as: "attempts" });
 
-module.exports = db;
+RoomTaskProgress.belongsTo(DiscussionRoom, { foreignKey: "roomId", as: "room" });
+DiscussionRoom.hasMany(RoomTaskProgress, { foreignKey: "roomId", as: "tasks" });
+
+Materi.hasOne(MateriAnswer, { foreignKey: "materiId", as: "answer" });
+MateriAnswer.belongsTo(Materi, { foreignKey: "materiId", as: "materi" });
+
+module.exports = {
+  User,
+  Materi,
+  MateriAnswer,
+  MateriSection,
+  UserMateriProgress,
+  DiscussionRoom,
+  DiscussionMessage,
+  Upload,
+  LeaderboardIndividu,
+  LeaderboardKelompok,
+  Badge,
+  UserBadge,
+  Clue,
+  GameLevel,
+  GameQuestion,
+  DiscussionClueLog,
+  RoomMember,
+  Workspace,
+  WorkspaceAttempt,
+  RoomTaskProgress,
+  Submission,
+  UserProgress,
+  TeacherFeedback,
+};
+
+
