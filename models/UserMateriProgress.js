@@ -38,6 +38,10 @@ const UserMateriProgress = sequelize.define(
       defaultValue: 0, 
       allowNull: false,
     },
+    questSteps: {
+  type: DataTypes.TEXT,
+  defaultValue: "[]",
+},
   },
   {
     tableName: "user_material_progress",

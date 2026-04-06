@@ -9,12 +9,12 @@ const MateriAnswer = require("../models/MateriAnswer");
 const fs = require("fs");
 const path = require("path");
 
-// 🆕 QUEST SYSTEM - HANYA 2 STEPS
 const QUEST_STEPS = ["watch_video", "open_mini_lesson"];
+
 const XP_REWARDS = {
-  watch_video: 20,
-  open_mini_lesson: 25
-};
+  watch_video: 15,
+  open_mini_lesson: 15
+};;
 
 // ================= MATERI CRUD =================
 exports.listMateri = async (req, res) => {
@@ -74,76 +74,93 @@ exports.getMateriDetail = async (req, res) => {
     const videoSection = sections.find(s => s.type === "video" && s.content);
     const miniLesson = sections.find(s => s.type === "mini");
 
-    let progress = { completedSections: [], materiXP: 0, totalXP: 0, userXP: 0 };
+    let progress = {
+      completedSections: [],
+      completedSteps: [],
+      materiXP: 0,
+      userXP: 0
+    };
 
     if (userId) {
-      const userProgress = await UserMateriProgress.findOne({ where: { userId, materiId: id } });
+      const userProgress = await UserMateriProgress.findOne({
+        where: { userId, materiId: id }
+      });
+
       const user = await User.findByPk(userId);
-      
+
       progress = {
-        completedSections: userProgress ? JSON.parse(userProgress.completedSections || '[]') : [],
+        completedSections: userProgress
+          ? JSON.parse(userProgress.completedSections || "[]")
+          : [],
+        completedSteps: userProgress
+          ? JSON.parse(userProgress.questSteps || "[]")
+          : [],
         materiXP: userProgress?.xp || 0,
-        totalXP: userProgress?.totalXP || 0,
-        userXP: user?.xp || 0 // ✅ XP AWAL USER
+        userXP: user?.xp || 0
       };
     }
 
     res.json({
       status: true,
       data: {
-        materi: { id: materi.id, title: materi.title, description: materi.description || "" },
-        videoSection: videoSection || null,
-        miniLesson: miniLesson || null,
+        materi,
+        videoSection,
+        miniLesson,
         sections,
         progress
       }
     });
+
   } catch (err) {
-    console.error('GetMateriDetail ERROR:', err);
+    console.error(err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
-// 🔥 COMPLETE QUEST (2 STEPS + GLOBAL XP UPDATE)
-// 🆕 XP ONLY VERSION
 exports.completeStep = async (req, res) => {
   try {
     const userId = req.user.id;
     const materiId = parseInt(req.params.id);
     const { step } = req.body;
 
-    if (!STEPS.includes(step)) {
+    if (!QUEST_STEPS.includes(step)) {
       return res.status(400).json({ status: false, message: "Invalid step" });
     }
 
-    let progress = await UserMateriProgress.findOne({ where: { userId, materiId } });
+    let progress = await UserMateriProgress.findOne({
+      where: { userId, materiId }
+    });
+
     if (!progress) {
       progress = await UserMateriProgress.create({
-        userId, materiId, completedSections: JSON.stringify([]), percent: 0, xp: 0
+        userId,
+        materiId,
+        completedSections: JSON.stringify([]),
+        questSteps: JSON.stringify([]),
+        percent: 0,
+        xp: 0
       });
     }
 
-    let completedSteps = JSON.parse(progress.completedSections || '[]');
-    completedSteps = completedSteps.filter(s => STEPS.includes(s));
+    let completedSteps = JSON.parse(progress.questSteps || "[]");
+
+    // 🔥 bersihin data aneh
+    completedSteps = completedSteps.filter(s => QUEST_STEPS.includes(s));
 
     let xpGain = 0;
+
     if (!completedSteps.includes(step)) {
-      xpGain = XP_MAP[step] || 0;
+      xpGain = XP_REWARDS[step] || 0;
       completedSteps.push(step);
     }
 
-    const newMateriXP = (progress.xp || 0) + xpGain;
-    const percent = Math.min(Math.round((completedSteps.length / STEPS.length) * 100), 100);
-
-    // 🆕 UPDATE MATERI XP
     await progress.update({
-      completedSections: JSON.stringify(completedSteps),
-      percent, xp: newMateriXP
+      questSteps: JSON.stringify(completedSteps)
     });
 
-    // 🆕 UPDATE GLOBAL USER XP
     const user = await User.findByPk(userId);
     let newTotalXP = user.xp;
+
     if (xpGain > 0) {
       newTotalXP += xpGain;
       await user.update({ xp: newTotalXP });
@@ -152,9 +169,7 @@ exports.completeStep = async (req, res) => {
     res.json({
       status: true,
       xpGain,
-      totalXP: newTotalXP,  // 🆕 USER global XP
-      materiXP: newMateriXP,
-      percent,
+      totalXP: newTotalXP,
       completedSteps
     });
 
