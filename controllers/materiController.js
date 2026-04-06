@@ -9,13 +9,11 @@ const MateriAnswer = require("../models/MateriAnswer");
 const fs = require("fs");
 const path = require("path");
 
-const STEPS = ["watch_video", "open_mini_lesson", "join_discussion", "submit_answer"];
+const STEPS = ["watch_video", "open_mini_lesson",];
 
 const XP_MAP = {
   watch_video: 10,
   open_mini_lesson: 15,
-  join_discussion: 20,
-  submit_answer: 50
 };
 
 // ================= MATERI CRUD =================
@@ -185,7 +183,7 @@ exports.getMateriDetail = async (req, res) => {
 };
 
 // ================= COMPLETE STEP (GAMIFIKASI LENGKAP) =================
-// 🆕 XP ONLY VERSION
+
 exports.completeStep = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -196,15 +194,21 @@ exports.completeStep = async (req, res) => {
       return res.status(400).json({ status: false, message: "Invalid step" });
     }
 
-    let progress = await UserMateriProgress.findOne({ where: { userId, materiId } });
+    let progress = await UserMateriProgress.findOne({
+      where: { userId, materiId }
+    });
+
     if (!progress) {
       progress = await UserMateriProgress.create({
-        userId, materiId, completedSections: JSON.stringify([]), percent: 0, xp: 0
+        userId,
+        materiId,
+        completedSections: JSON.stringify([]),
+        percent: 0,
+        xp: 0
       });
     }
 
-    let completedSteps = JSON.parse(progress.completedSections || '[]');
-    completedSteps = completedSteps.filter(s => STEPS.includes(s));
+    let completedSteps = JSON.parse(progress.completedSections || "[]");
 
     let xpGain = 0;
     if (!completedSteps.includes(step)) {
@@ -213,17 +217,21 @@ exports.completeStep = async (req, res) => {
     }
 
     const newMateriXP = (progress.xp || 0) + xpGain;
-    const percent = Math.min(Math.round((completedSteps.length / STEPS.length) * 100), 100);
 
-    // 🆕 UPDATE MATERI XP
+    const percent = Math.round(
+      (completedSteps.length / STEPS.length) * 100
+    );
+
     await progress.update({
       completedSections: JSON.stringify(completedSteps),
-      percent, xp: newMateriXP
+      percent,
+      xp: newMateriXP
     });
 
-    // 🆕 UPDATE GLOBAL USER XP
+    // 🔥 GLOBAL XP USER
     const user = await User.findByPk(userId);
     let newTotalXP = user.xp;
+
     if (xpGain > 0) {
       newTotalXP += xpGain;
       await user.update({ xp: newTotalXP });
@@ -232,10 +240,10 @@ exports.completeStep = async (req, res) => {
     res.json({
       status: true,
       xpGain,
-      totalXP: newTotalXP,  // 🆕 USER global XP
+      totalXP: newTotalXP,
       materiXP: newMateriXP,
-      percent,
-      completedSteps
+      completedSteps,
+      percent
     });
 
   } catch (err) {
