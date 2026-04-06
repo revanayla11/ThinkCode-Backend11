@@ -732,118 +732,100 @@ exports.getSubmissionStatus = async (req, res) => {
   }
 };
 
+// 🔥 FULL ENHANCED validateWorkspace - TEMPLATE + GURU JAWABAN
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
     const userId = req.user.id;
 
-    console.log(`🔍 Validasi workspace room ${roomId} oleh user ${userId}`);
-
-    // 1. Cek workspace
+    // 1. Existing workspace check...
     const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
-    if (!workspace) {
-      return res.status(400).json({ 
-        valid: false, 
-        message: "Belum ada workspace yang disimpan!" 
-      });
-    }
+    if (!workspace) return res.status(400).json({ valid: false, message: "Belum ada workspace!" });
 
-    // 2. Ambil room & materiId
     const room = await DiscussionRoom.findByPk(roomId);
-    if (!room) {
-      return res.status(404).json({ valid: false, message: "Room tidak ditemukan" });
-    }
-
-    // 3. Ambil jawaban resmi
     const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
-    if (!officialAnswer || !officialAnswer.pseudocode) {
-      return res.status(400).json({ 
-        valid: false, 
-        message: "Admin belum set jawaban resmi!" 
-      });
-    }
+    if (!officialAnswer) return res.status(400).json({ valid: false, message: "Guru belum upload jawaban!" });
 
-    // 4. NORMALIZE PSEUDOCODE
+    // 2. PSEUDOCODE VALIDATION (vs GURU)
     const normalizeText = (text) => (text || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
     const studentPseudo = normalizeText(workspace.pseudocode);
     const officialPseudo = normalizeText(officialAnswer.pseudocode);
     const pseudocodeMatch = studentPseudo === officialPseudo;
 
-    // 5. VALIDASI FLOWCHART - ✅ FIXED SCOPE
+    // 3. FLOWCHART VALIDATION (vs GURU)
+    const parseFlowchart = (flowData) => {
+      try {
+        return typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || { conditions: [], elseInstruction: '' };
+      } catch {
+        return { conditions: [], elseInstruction: '' };
+      }
+    };
+
+    const studentFlowchart = parseFlowchart(workspace.flowchart);
+    const officialFlowchart = parseFlowchart(officialAnswer.flowchart);
+
     let flowchartMatch = true;
-    let flowchartDetails = {};
-    let studentConditions = []; // ✅ Deklarasi di luar try
-    let officialConditions = [];
+    let flowchartDetails = {
+      conditionsCountMatch: studentFlowchart.conditions.length === officialFlowchart.conditions.length,
+      conditions: [],
+      elseMatch: normalizeText(studentFlowchart.elseInstruction) === normalizeText(officialFlowchart.elseInstruction)
+    };
 
-    try {
-      // Parse flowchart dengan safe parsing
-      const parseFlowchart = (flowData) => {
-        try {
-          return typeof flowData === 'string' 
-            ? JSON.parse(flowData || '{}')
-            : (flowData || { conditions: [], elseInstruction: '' });
-        } catch {
-          return { conditions: [], elseInstruction: '' };
-        }
-      };
+    const studentConditions = Array.isArray(studentFlowchart.conditions) ? studentFlowchart.conditions : [];
+    const officialConditions = Array.isArray(officialFlowchart.conditions) ? officialFlowchart.conditions : [];
 
-      const studentFlowchart = parseFlowchart(workspace.flowchart);
-      const officialFlowchart = parseFlowchart(officialAnswer.flowchart);
+    if (studentConditions.length !== officialConditions.length) {
+      flowchartMatch = false;
+    } else {
+      for (let i = 0; i < studentConditions.length; i++) {
+        const studentCond = normalizeText(studentConditions[i]?.condition || '');
+        const officialCond = normalizeText(officialConditions[i]?.condition || '');
+        const studentYes = normalizeText(studentConditions[i]?.yes || '');
+        const officialYes = normalizeText(officialConditions[i]?.yes || '');
 
-      // ✅ Sekarang aman - sudah dideklarasi di atas
-      studentConditions = Array.isArray(studentFlowchart.conditions) ? studentFlowchart.conditions : [];
-      officialConditions = Array.isArray(officialFlowchart.conditions) ? officialFlowchart.conditions : [];
-      
-      flowchartDetails = {
-        conditionsCountMatch: studentConditions.length === officialConditions.length,
-        conditions: [],
-        elseMatch: normalizeText(studentFlowchart.elseInstruction) === normalizeText(officialFlowchart.elseInstruction)
-      };
+        const condMatch = {
+          index: i + 1,
+          conditionMatch: studentCond === officialCond,
+          yesMatch: studentYes === officialYes
+        };
 
-      if (studentConditions.length !== officialConditions.length) {
-        flowchartMatch = false;
-      } else {
-        for (let i = 0; i < studentConditions.length; i++) {
-          const studentCond = normalizeText(studentConditions[i]?.condition || '');
-          const officialCond = normalizeText(officialConditions[i]?.condition || '');
-          const studentYes = normalizeText(studentConditions[i]?.yes || '');
-          const officialYes = normalizeText(officialConditions[i]?.yes || '');
-
-          const condMatch = {
-            index: i + 1,
-            conditionMatch: studentCond === officialCond,
-            yesMatch: studentYes === officialYes
-          };
-
-          flowchartDetails.conditions.push(condMatch);
-          
-          if (!condMatch.conditionMatch || !condMatch.yesMatch) {
-            flowchartMatch = false;
-          }
+        flowchartDetails.conditions.push(condMatch);
+        if (!condMatch.conditionMatch || !condMatch.yesMatch) {
+          flowchartMatch = false;
         }
       }
-    } catch (parseError) {
-      flowchartMatch = false;
-      console.error("Flowchart parse error:", parseError);
-      flowchartDetails = { error: "Format flowchart tidak valid" };
     }
 
-    const isValid = pseudocodeMatch && flowchartMatch;
+    // 🔥 4. TEMPLATE BLANK VALIDATION (BONUS)
+    const templateData = await exports.getPseudocodeTemplate({ params: { roomId } }, { json: () => ({}) });
+    const { blanks } = templateData.data.data;
+    
+    // Extract student answers from filled template
+    const studentBlanks = extractBlanksFromCode(workspace.pseudocode, blanks);
+    const blankValidation = blanks.map((blank, i) => ({
+      blankId: i,
+      position: blank.position,
+      student: studentBlanks[i] || '',
+      expected: blank.expected,
+      correct: normalizeText(studentBlanks[i]) === normalizeText(blank.expected),
+      hint: blank.hint
+    }));
 
-    // ✅ Sekarang studentConditions aman dipakai
-    console.log(`✅ Validasi selesai: ${isValid ? 'BENAR' : 'SALAH'}`, {
-      pseudocodeMatch,
-      flowchartMatch,
-      studentConditionsCount: studentConditions.length,
-      officialConditionsCount: officialConditions.length
-    });
+    const blanksCorrect = blankValidation.every(b => b.correct);
+
+    const isValid = pseudocodeMatch && flowchartMatch && blanksCorrect;
 
     res.json({
       valid: isValid,
       details: {
         pseudocodeMatch,
         flowchartMatch,
+        blanksCorrect,
+        blankValidation,
         flowchartDetails,
+        smartHints: blankValidation
+          .filter(b => !b.correct)
+          .map(b => `Blank ${b.blankId + 1}: ${b.hint}`),
         pseudocode: {
           student: workspace.pseudocode?.trim(),
           official: officialAnswer.pseudocode?.trim(),
@@ -853,10 +835,244 @@ exports.validateWorkspace = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ Validasi workspace FULL ERROR:", error);
-    res.status(500).json({ 
-      valid: false, 
-      message: `Server error: ${error.message}` 
+    console.error("Validation error:", error);
+    res.status(500).json({ valid: false, message: "Server error" });
+  }
+};
+
+// 🔥 HELPER untuk extract blanks
+const extractBlanksFromCode = (code, blanks) => {
+  const lines = code.split('\n');
+  return blanks.map(blank => {
+    // Simple keyword extraction based on position
+    for (let line of lines) {
+      const normLine = normalizeText(line);
+      if (normLine.includes(normalizeText(blank.expected))) {
+        return line.trim().split(' ').find(word => 
+          normalizeText(word) === normalizeText(blank.expected)
+        ) || '';
+      }
+    }
+    return '';
+  });
+};
+
+exports.getPseudocodeTemplate = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await DiscussionRoom.findByPk(roomId);
+    if (!room) return res.status(404).json({ status: false, message: "Room not found" });
+
+    let template, blanks, expectedFull, materiType;
+
+    // 🔥 DYNAMIC TEMPLATE BERDASARKAN MATERI ID
+    switch (room.materiId.toString()) {
+      // 📝 MATERI 1: SIMPLE IF
+      case 'if-simple':
+        template = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ENDIF
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Nama variabel input", expected: "angka", position: "read" },
+          { id: 1, hint: "Variabel kondisi", expected: "angka", position: "IF" },
+          { id: 2, hint: "Variabel output", expected: "angka", position: "write" }
+        ];
+
+        expectedFull = template; // No blanks for simple IF
+        materiType = "if-simple";
+        break;
+
+      // 🔀 MATERI 2: IF-ELSE
+      case 'if-else':
+        template = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ___BLANK_0___
+        write("Angka ", angka, " adalah ___BLANK_1___")
+    ___BLANK_2___
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Struktur untuk kondisi kedua", expected: "ELSE", position: "struktur" },
+          { id: 1, hint: "Hasil untuk angka negatif", expected: "Negatif", position: "output" },
+          { id: 2, hint: "Menutup struktur IF", expected: "ENDIF", position: "penutup" }
+        ];
+
+        expectedFull = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ELSE
+        write("Angka ", angka, " adalah Negatif")
+    ENDIF
+
+END`;
+        materiType = "if-else";
+        break;
+
+      // 🔀🔀 MATERI 3: IF-ELSE-IF
+      case 'if-elseif':
+        template = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ___BLANK_0___ (angka < 0) THEN
+        write("Angka ", angka, " adalah Negatif")
+    ___BLANK_1___
+        write("Angka ", angka, " adalah Nol")
+    ___BLANK_2___
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Kondisi kedua (negatif)", expected: "ELSE IF", position: "kedua" },
+          { id: 1, hint: "Kondisi terakhir", expected: "ELSE", position: "terakhir" },
+          { id: 2, hint: "Menutup semua kondisi", expected: "ENDIF", position: "penutup" }
+        ];
+
+        expectedFull = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ELSE IF (angka < 0) THEN
+        write("Angka ", angka, " adalah Negatif")
+    ELSE
+        write("Angka ", angka, " adalah Nol")
+    ENDIF
+
+END`;
+        materiType = "if-elseif";
+        break;
+
+      default:
+        // FALLBACK - Simple IF
+        template = `DEKLARASI
+    ___BLANK_0___ : integer
+
+ALGORITMA
+    read(___BLANK_1___)
+    
+    IF (___BLANK_2___ > 0) THEN
+        write("Angka ", ___BLANK_3___, " adalah ___BLANK_4___")
+    ENDIF
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Nama variabel", expected: "angka", position: "deklarasi" },
+          { id: 1, hint: "Input variabel", expected: "angka", position: "read" },
+          { id: 2, hint: "Kondisi variabel", expected: "angka", position: "IF" },
+          { id: 3, hint: "Output variabel", expected: "angka", position: "write" },
+          { id: 4, hint: "Hasil positif", expected: "Positif", position: "output" }
+        ];
+
+        expectedFull = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ENDIF
+
+END`;
+        materiType = "default";
+    }
+
+    res.json({
+      status: true,
+      data: {
+        template,
+        blanks,
+        expectedFull,
+        materiType,
+        totalBlanks: blanks.length,
+        instruction: `Fill ${blanks.length} blanks to complete the algorithm!`
+      }
     });
+  } catch (error) {
+    console.error("Template error:", error);
+    res.status(500).json({ 
+      status: false, 
+      message: "Failed to load template",
+      data: { template: "ALGORITMA\n    read(input)\n    IF (input > 0) THEN\n        write('Positif')\n    ENDIF\nEND" }
+    });
+  }
+};
+
+// 🔥 TIMER ENDPOINTS
+exports.startRoomTimer = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const duration = 3600 * 1000; // 60 minutes
+    const timerEnd = new Date(Date.now() + duration);
+    
+    await DiscussionRoom.update(
+      { timerStart: new Date(), timerEnd },
+      { where: { id: roomId } }
+    );
+    
+    res.json({ 
+      status: true, 
+      timerEnd: timerEnd.toISOString(), 
+      duration: 3600,
+      message: "Timer started - 60 minutes" 
+    });
+  } catch (error) {
+    res.status(500).json({ status: false, message: "Timer start failed" });
+  }
+};
+
+exports.checkTimerPenalty = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await DiscussionRoom.findByPk(roomId);
+    
+    if (!room.timerEnd) {
+      return res.json({ timeLeft: 3600, overtimeMinutes: 0, penaltyXP: 0 });
+    }
+    
+    const now = Date.now();
+    const timeLeft = (new Date(room.timerEnd) - now) / 1000;
+    const overtimeMs = Math.max(0, now - new Date(room.timerEnd).getTime());
+    const overtimeMinutes = Math.floor(overtimeMs / 60000);
+    const penaltyXP = Math.floor(overtimeMinutes / 5) * 10;
+    
+    res.json({
+      timeLeft: Math.max(0, timeLeft),
+      overtimeMinutes,
+      penaltyXP,
+      expired: timeLeft <= 0
+    });
+  } catch (error) {
+    res.status(500).json({ timeLeft: 0, penaltyXP: 0 });
   }
 };
