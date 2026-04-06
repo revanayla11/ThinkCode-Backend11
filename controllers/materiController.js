@@ -90,21 +90,23 @@ exports.getMateriDetail = async (req, res) => {
       userXP: 0
     };
 
+    let userProgress = null;
+    let user = null;
+
     if (userId) {
-      // 🔥 WAJIB ADA INI
-      const userProgress = await UserMateriProgress.findOne({
+      userProgress = await UserMateriProgress.findOne({
         where: { userId, materiId: id }
       });
 
-      const user = await User.findByPk(userId);
-
-      progress = {
-        completedSections: safeParse(userProgress?.completedSections),
-        completedSteps: safeParse(userProgress?.questSteps),
-        materiXP: userProgress?.xp || 0,
-        userXP: user?.xp || 0
-      };
+      user = await User.findByPk(userId);
     }
+
+    progress = {
+      completedSections: safeParse(userProgress?.completedSections),
+      completedSteps: safeParse(userProgress?.questSteps),
+      materiXP: userProgress?.xp || 0,
+      userXP: user?.xp || 0
+    };
 
     res.json({
       status: true,
