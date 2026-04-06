@@ -185,98 +185,62 @@ exports.getMateriDetail = async (req, res) => {
 };
 
 // ================= COMPLETE STEP (GAMIFIKASI LENGKAP) =================
+// 🆕 XP ONLY VERSION
 exports.completeStep = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
     const materiId = parseInt(req.params.id);
     const { step } = req.body;
 
-    if (!userId) {
-      return res.status(401).json({ 
-        status: false, 
-        message: "Unauthorized - login dulu" 
-      });
-    }
-
     if (!STEPS.includes(step)) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "Invalid step" 
-      });
+      return res.status(400).json({ status: false, message: "Invalid step" });
     }
 
-    let progress = await UserMateriProgress.findOne({
-      where: { userId, materiId }
-    });
-
+    let progress = await UserMateriProgress.findOne({ where: { userId, materiId } });
     if (!progress) {
       progress = await UserMateriProgress.create({
-        userId,
-        materiId,
-        completedSections: JSON.stringify([]),
-        percent: 0,
-        xp: 0
+        userId, materiId, completedSections: JSON.stringify([]), percent: 0, xp: 0
       });
     }
 
     let completedSteps = JSON.parse(progress.completedSections || '[]');
-    
-    // Clean invalid steps
     completedSteps = completedSteps.filter(s => STEPS.includes(s));
 
-    // Validasi sequence (tidak bisa lompat)
-    if (step === "join_discussion" && !completedSteps.includes("watch_video")) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "Harus nonton video dulu!" 
-      });
-    }
-
-    let currentXp = progress.xp || 0;
     let xpGain = 0;
-
-    // Tambah step + XP jika belum ada
     if (!completedSteps.includes(step)) {
-      completedSteps.push(step);
       xpGain = XP_MAP[step] || 0;
-      currentXp += xpGain;
+      completedSteps.push(step);
     }
 
-    const percent = Math.min(
-      Math.round((completedSteps.length / STEPS.length) * 100), 
-      100
-    );
+    const newMateriXP = (progress.xp || 0) + xpGain;
+    const percent = Math.min(Math.round((completedSteps.length / STEPS.length) * 100), 100);
 
-    // Update UserMateriProgress
+    // 🆕 UPDATE MATERI XP
     await progress.update({
       completedSections: JSON.stringify(completedSteps),
-      percent,
-      xp: currentXp
+      percent, xp: newMateriXP
     });
 
-    // 🆕 Update User global XP
+    // 🆕 UPDATE GLOBAL USER XP
     const user = await User.findByPk(userId);
-    if (user && xpGain > 0) {
-      await user.update({
-        xp: user.xp + xpGain
-      });
+    let newTotalXP = user.xp;
+    if (xpGain > 0) {
+      newTotalXP += xpGain;
+      await user.update({ xp: newTotalXP });
     }
 
     res.json({
       status: true,
-      message: xpGain > 0 ? `+${xpGain} XP!` : "Sudah completed",
+      xpGain,
+      totalXP: newTotalXP,  // 🆕 USER global XP
+      materiXP: newMateriXP,
       percent,
-      completedSteps,
-      xp: currentXp,
-      xpGain
+      completedSteps
     });
 
   } catch (err) {
-    console.error("Complete Step Error:", err);
-    res.status(500).json({ 
-      status: false, 
-      message: "Server error" 
-    });
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
