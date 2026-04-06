@@ -80,6 +80,7 @@ Materi.hasMany(DiscussionRoom, { foreignKey: "materiId", as: "rooms" });
 UserBadge.belongsTo(Badge, { foreignKey: "badge_id" });
 
 Materi.hasMany(UserMateriProgress, { foreignKey: "materiId" });
+Materi.hasMany(models.MateriSection, { foreignKey: 'materiId', as: 'sections'});
 
 DiscussionClueLog.belongsTo(Clue, { foreignKey: "clueId" });
 DiscussionClueLog.belongsTo(User, { foreignKey: "takenBy" });

@@ -102,6 +102,7 @@ exports.deleteMateri = async (req, res) => {
 };
 
 // ================= 🔥 GET DETAIL MATERI (FULL FIX PERSIST) =================
+// ================= GET MATERI DETAIL (SAFE VERSION - NO INCLUDE) =================
 exports.getMateriDetail = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -109,17 +110,8 @@ exports.getMateriDetail = async (req, res) => {
 
     console.log(`🔍 Loading materi ${id} for user ${userId || 'guest'}`);
 
-    // 1. Get materi + sections
-    const materi = await Materi.findByPk(id, {
-      include: [
-        { 
-          model: MateriSection, 
-          as: 'sections', 
-          order: [['order', 'ASC']] 
-        }
-      ]
-    });
-
+    // 1. Get materi TANPA include (SAFE)
+    const materi = await Materi.findByPk(id);
     if (!materi) {
       return res.status(404).json({ 
         status: false, 
@@ -127,11 +119,17 @@ exports.getMateriDetail = async (req, res) => {
       });
     }
 
-    // 2. Filter untuk frontend
-    const videoSection = materi.sections?.find(s => s.type === "video" && s.content);
-    const miniLesson = materi.sections?.find(s => s.type === "mini");
+    // 2. Get sections TERPISAH (SAFE)
+    const sections = await MateriSection.findAll({
+      where: { materiId: id },
+      order: [["order", "ASC"]]
+    });
 
-    // 🔥 3. GET PERSISTENT PROGRESS
+    // 3. Filter sections
+    const videoSection = sections.find(s => s.type === "video" && s.content);
+    const miniLesson = sections.find(s => s.type === "mini");
+
+    // 🔥 4. GET USER PROGRESS
     let progress = { 
       completedSections: [], 
       materiXP: 0, 
@@ -140,19 +138,16 @@ exports.getMateriDetail = async (req, res) => {
     };
 
     if (userId) {
-      // Progress materi
       const userProgress = await UserMateriProgress.findOne({ 
         where: { userId, materiId: id } 
       });
-      
-      // User global XP
       const user = await User.findByPk(userId);
       
       progress = {
         completedSections: userProgress ? JSON.parse(userProgress.completedSections || '[]') : [],
         materiXP: userProgress?.xp || 0,
         totalXP: userProgress?.totalXP || 0,
-        userXP: user?.xp || 0  // XP AWAL USER DARI DB!
+        userXP: user?.xp || 0
       };
     }
 
@@ -164,27 +159,18 @@ exports.getMateriDetail = async (req, res) => {
           title: materi.title,
           description: materi.description || ""
         },
-        videoSection: videoSection ? {
-          id: videoSection.id,
-          type: videoSection.type,
-          content: videoSection.content,
-          title: videoSection.title
-        } : null,
-        miniLesson: miniLesson ? {
-          type: miniLesson.type,
-          content: miniLesson.content,
-          title: miniLesson.title
-        } : null,
-        sections: materi.sections || [],
-        progress  // ✅ PERSISTENT!
+        videoSection: videoSection || null,
+        miniLesson: miniLesson || null,
+        sections: sections,
+        progress
       }
     });
 
   } catch (err) {
-    console.error('🚨 Get Materi Detail ERROR:', err);
+    console.error('🚨 Get Materi Detail ERROR:', err.message);
     res.status(500).json({ 
       status: false, 
-      message: "Server error: " + err.message 
+      message: "Server error" 
     });
   }
 };

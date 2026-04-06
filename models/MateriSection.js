@@ -11,6 +11,11 @@ const MateriSection = sequelize.define("MateriSection", {
 }, {
   tableName: "materi_sections"
 });
+  MateriSection.associate = (models) => {
+    MateriSection.belongsTo(models.Materi, {
+      foreignKey: 'materiId'
+    });
+  };
 
 module.exports = MateriSection;
 
