@@ -9,12 +9,11 @@ const MateriAnswer = require("../models/MateriAnswer");
 const fs = require("fs");
 const path = require("path");
 
-// 🆕 QUEST SYSTEM - 3 STEPS
-const QUEST_STEPS = ["watch_video", "open_mini_lesson", "join_discussion"];
+// 🆕 QUEST SYSTEM - HANYA 2 STEPS
+const QUEST_STEPS = ["watch_video", "open_mini_lesson"];
 const XP_REWARDS = {
   watch_video: 20,
-  open_mini_lesson: 25,
-  join_discussion: 35
+  open_mini_lesson: 25
 };
 
 // ================= MATERI CRUD =================
@@ -56,53 +55,7 @@ exports.listMateri = async (req, res) => {
   }
 };
 
-exports.getMateri = async (req, res) => {
-  try {
-    const m = await Materi.findByPk(req.params.id);
-    if (!m) return res.status(404).json({ status: false, message: "Not found" });
-    res.json({ status: true, data: m });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false, message: "Server error" });
-  }
-};
-
-exports.createMateri = async (req, res) => {
-  try {
-    const m = await Materi.create(req.body);
-    res.json({ status: true, data: m });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false, message: "Failed to create" });
-  }
-};
-
-exports.updateMateri = async (req, res) => {
-  try {
-    const m = await Materi.findByPk(req.params.id);
-    if (!m) return res.status(404).json({ status: false, message: "Not found" });
-    await m.update(req.body);
-    res.json({ status: true, data: m });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false, message: "Failed to update" });
-  }
-};
-
-exports.deleteMateri = async (req, res) => {
-  try {
-    const m = await Materi.findByPk(req.params.id);
-    if (!m) return res.status(404).json({ status: false, message: "Not found" });
-    await m.destroy();
-    res.json({ status: true, message: "Deleted" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false, message: "Failed to delete" });
-  }
-};
-
-// ================= 🔥 GET DETAIL MATERI (FULL FIX PERSIST) =================
-// ================= GET MATERI DETAIL (SAFE VERSION - NO INCLUDE) =================
+// ================= GET DETAIL MATERI (XP AWAL FIX) =================
 exports.getMateriDetail = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -110,7 +63,7 @@ exports.getMateriDetail = async (req, res) => {
 
     console.log(`🔍 Loading materi ${id} for user ${userId || 'guest'}`);
 
-    // 1. Get materi TANPA include (SAFE)
+    // 1. Get materi
     const materi = await Materi.findByPk(id);
     if (!materi) {
       return res.status(404).json({ 
@@ -119,22 +72,21 @@ exports.getMateriDetail = async (req, res) => {
       });
     }
 
-    // 2. Get sections TERPISAH (SAFE)
+    // 2. Get sections
     const sections = await MateriSection.findAll({
       where: { materiId: id },
       order: [["order", "ASC"]]
     });
 
-    // 3. Filter sections
     const videoSection = sections.find(s => s.type === "video" && s.content);
     const miniLesson = sections.find(s => s.type === "mini");
 
-    // 🔥 4. GET USER PROGRESS
+    // 🔥 3. GET USER PROGRESS + XP AWAL
     let progress = { 
       completedSections: [], 
       materiXP: 0, 
       totalXP: 0,
-      userXP: 0 
+      userXP: 0 // ✅ XP AWAL USER SEBELUM QUEST
     };
 
     if (userId) {
@@ -147,8 +99,10 @@ exports.getMateriDetail = async (req, res) => {
         completedSections: userProgress ? JSON.parse(userProgress.completedSections || '[]') : [],
         materiXP: userProgress?.xp || 0,
         totalXP: userProgress?.totalXP || 0,
-        userXP: user?.xp || 0
+        userXP: user?.xp || 0 // ✅ XP USER SEBELUM QUEST DITAMBAH
       };
+      
+      console.log('📊 Progress:', progress);
     }
 
     res.json({
@@ -175,14 +129,14 @@ exports.getMateriDetail = async (req, res) => {
   }
 };
 
-// ================= 🔥 COMPLETE QUEST (3 STEPS + GLOBAL XP UPDATE) =================
+// 🔥 COMPLETE QUEST (2 STEPS + GLOBAL XP UPDATE)
 exports.completeStep = async (req, res) => {
   try {
     const userId = req.user.id;
     const materiId = parseInt(req.params.id);
     const { step } = req.body;
 
-    // Validasi
+    // Validasi - HANYA 2 steps
     if (!QUEST_STEPS.includes(step)) {
       return res.status(400).json({ 
         status: false, 
@@ -240,8 +194,9 @@ exports.completeStep = async (req, res) => {
 
     // 🔥 5. UPDATE GLOBAL USER XP
     const user = await User.findByPk(userId);
-    if (user && xpGain > 0) {
-      const finalUserXP = (user.xp || 0) + xpGain;
+    let finalUserXP = user?.xp || 0;
+    if (xpGain > 0) {
+      finalUserXP += xpGain;
       await user.update({ xp: finalUserXP });
     }
 
@@ -253,7 +208,7 @@ exports.completeStep = async (req, res) => {
         completedSteps,
         materiXP: newMateriXP,
         totalXP: newTotalXP,
-        userXP: user ? user.xp : 0,  // XP TERBARU!
+        userXP: finalUserXP, // ✅ XP TERBARU SETELAH QUEST
         percent
       }
     });
@@ -264,6 +219,52 @@ exports.completeStep = async (req, res) => {
       status: false, 
       message: "Gagal quest: " + err.message 
     });
+  }
+};
+
+// ================= MATERI CRUD LAINNYA =================
+exports.getMateri = async (req, res) => {
+  try {
+    const m = await Materi.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ status: false, message: "Not found" });
+    res.json({ status: true, data: m });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+exports.createMateri = async (req, res) => {
+  try {
+    const m = await Materi.create(req.body);
+    res.json({ status: true, data: m });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Failed to create" });
+  }
+};
+
+exports.updateMateri = async (req, res) => {
+  try {
+    const m = await Materi.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ status: false, message: "Not found" });
+    await m.update(req.body);
+    res.json({ status: true, data: m });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Failed to update" });
+  }
+};
+
+exports.deleteMateri = async (req, res) => {
+  try {
+    const m = await Materi.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ status: false, message: "Not found" });
+    await m.destroy();
+    res.json({ status: true, message: "Deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Failed to delete" });
   }
 };
 
