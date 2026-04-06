@@ -2,6 +2,7 @@ const User = require("../models/User");
 const Materi = require("../models/Materi");
 const MateriSection = require("../models/MateriSection");
 const UserMateriProgress = require("../models/UserMateriProgress");
+const UserProgress = require("../models/UserProgress");
 const Clue = require("../models/Clue");
 const DiscussionRoom = require("../models/DiscussionRoom");
 const Upload = require("../models/Upload");
@@ -30,12 +31,11 @@ exports.listMateri = async (req, res) => {
       });
       
       progresses.forEach(p => {
-        progressMap[p.materiId] = {
-          percent: p.percent || 0,
-          xp: p.xp || 0,
-          completedSteps: JSON.parse(p.completedSections || '[]'),
-          totalXP: p.totalXP || 0
-        };
+      progressMap[p.materiId] = {
+        percent: p.percent || 0,
+        xp: p.xp || 0,
+        completedSteps: JSON.parse(p.questSteps || '[]'), // ✅ FIX
+      };
       });
     }
 
@@ -74,6 +74,15 @@ exports.getMateriDetail = async (req, res) => {
     const videoSection = sections.find(s => s.type === "video" && s.content);
     const miniLesson = sections.find(s => s.type === "mini");
 
+    // ✅ SAFE PARSE
+    const safeParse = (data) => {
+      try {
+        return JSON.parse(data);
+      } catch {
+        return [];
+      }
+    };
+
     let progress = {
       completedSections: [],
       completedSteps: [],
@@ -82,6 +91,7 @@ exports.getMateriDetail = async (req, res) => {
     };
 
     if (userId) {
+      // 🔥 WAJIB ADA INI
       const userProgress = await UserMateriProgress.findOne({
         where: { userId, materiId: id }
       });
@@ -89,24 +99,12 @@ exports.getMateriDetail = async (req, res) => {
       const user = await User.findByPk(userId);
 
       progress = {
-        completedSections: userProgress
-          ? JSON.parse(userProgress.completedSections || "[]")
-          : [],
-        completedSteps: (() => {
-          try {
-            return userProgress?.questSteps
-              ? JSON.parse(userProgress.questSteps)
-              : [];
-          } catch {
-            return [];
-          }
-        })(),
-        
+        completedSections: safeParse(userProgress?.completedSections),
+        completedSteps: safeParse(userProgress?.questSteps),
         materiXP: userProgress?.xp || 0,
         userXP: user?.xp || 0
       };
     }
-    console.log("DB questSteps:", userProgress?.questSteps);
 
     res.json({
       status: true,
@@ -120,7 +118,7 @@ exports.getMateriDetail = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("ERROR getMateriDetail:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
