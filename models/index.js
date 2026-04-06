@@ -21,7 +21,6 @@ const RoomTaskProgress = require("./RoomTaskProgress");
 const Submission = require("./Submission");
 const UserProgress = require("./UserProgress");
 const TeacherFeedback = require("./TeacherFeedback");
-const MateriSection = require("./MateriSection");
 
 MateriSection.belongsTo(Materi, { foreignKey: "materiId" });
 DiscussionRoom.belongsTo(Materi, { foreignKey: "materiId" });

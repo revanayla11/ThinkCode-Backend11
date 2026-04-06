@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
+const Materi = require("./Materi");
 
 const MateriSection = sequelize.define("MateriSection", {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -11,11 +12,9 @@ const MateriSection = sequelize.define("MateriSection", {
 }, {
   tableName: "materi_sections"
 });
-  MateriSection.associate = (models) => {
-    MateriSection.belongsTo(models.Materi, {
+    MateriSection.belongsTo(Materi, {
       foreignKey: 'materiId'
     });
-  };
 
 module.exports = MateriSection;
 
