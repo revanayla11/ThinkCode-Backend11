@@ -1,21 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const verifyToken = require("../middleware/verifyToken"); // optional: protect submit/progress
+const verifyToken = require("../middleware/verifyToken");
 const gameController = require("../controllers/gameController");
 
-const {
-  getLevels,
-  getLevel,
-  submitLevel,
-  getProgress
-} = require("../controllers/gameController");
-
-router.post("/xp", verifyToken, gameController.addXp);
+router.get("/map", gameController.getGameMap); // BARU - untuk game map
 router.get("/levels", gameController.getLevels);
+router.get("/progress", verifyToken, gameController.getProgress);
 router.get("/level/:id", gameController.getLevel);
 router.post("/submit/:id", verifyToken, gameController.submitLevel);
-router.get("/progress", verifyToken, gameController.getProgress);
+router.post("/xp", verifyToken, gameController.addXp);
 
 module.exports = router;
-
-

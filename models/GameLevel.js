@@ -1,27 +1,31 @@
-const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
-const Materi = require("./Materi"); 
-const Badge = require("./Badge");
+module.exports = (sequelize, DataTypes) => {
+  const GameLevel = sequelize.define('GameLevel', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    materi_id: DataTypes.INTEGER,
+    levelNumber: DataTypes.INTEGER,
+    title: DataTypes.STRING,
+    type: { // NEW: quiz, flashcard, memory, typing, sort
+      type: DataTypes.ENUM('quiz', 'flashcard', 'memory', 'typing', 'sort'),
+      defaultValue: 'quiz'
+    },
+    totalQuestions: DataTypes.INTEGER,
+    reward_xp: DataTypes.INTEGER,
+    reward_badge_id: DataTypes.INTEGER,
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    }
+  });
 
-const GameLevel = sequelize.define(
-  "GameLevel",
-  {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    title: { type: DataTypes.STRING, allowNull: false },
-    levelNumber: { type: DataTypes.INTEGER, allowNull: false },
-    totalQuestions: { type: DataTypes.INTEGER, defaultValue: 10 },
-    reward_xp: { type: DataTypes.INTEGER, defaultValue: 0 },
-    reward_badge_id: { type: DataTypes.INTEGER, allowNull: true },
-    materi_id: { type: DataTypes.INTEGER, allowNull: false }, 
+  GameLevel.associate = (models) => {
+    GameLevel.belongsTo(models.Materi, { foreignKey: 'materi_id' });
+    GameLevel.belongsTo(models.Badge, { foreignKey: 'reward_badge_id' });
+    GameLevel.hasMany(models.GameQuestion, { foreignKey: 'levelId' });
+  };
 
-  },
-  {
-    tableName: "game_levels",
-    timestamps: false,
-  }
-);
-
-GameLevel.belongsTo(Materi, { foreignKey: "materi_id" });
-GameLevel.belongsTo(Badge, { foreignKey: "reward_badge_id"});
-
-module.exports = GameLevel;
+  return GameLevel;
+};
