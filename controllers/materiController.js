@@ -85,100 +85,66 @@ exports.deleteMateri = async (req, res) => {
 };
 
 // ================= GET DETAIL MATERI (PERBAIKAN LENGKAP) =================
-// ================= GET DETAIL MATERI (SAFE VERSION) =================
 exports.getMateriDetail = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const userId = req.user?.id;
 
-    console.log(`🔍 Get materi ${id} for user ${userId || 'guest'}`);
-
-    // 1. Get materi dasar
     const materi = await Materi.findByPk(id);
     if (!materi) {
-      return res.status(404).json({ 
-        status: false, 
-        message: "Materi tidak ditemukan" 
-      });
+      return res.status(404).json({ status: false });
     }
 
-    // 2. Get sections TERPISAH (SAFE)
     const sections = await MateriSection.findAll({
       where: { materiId: id },
-      order: [["order", "ASC"]]
+      order: [["order", "ASC"]],
     });
 
-    // 3. Get clues TERPISAH (SAFE)
-    const clues = await Clue.findAll({
-      where: { materiId: id },
-      order: [["id", "ASC"]]
-    });
-
-    // 4. Filter untuk frontend
-    const videoSection = sections.find(s => s.type === "video" && s.content);
+    const videoSection = sections.find(s => s.type === "video");
     const miniSection = sections.find(s => s.type === "mini");
 
-    // 5. Get progress jika user login
-    let progress = null;
+    let progress = {
+      completedSections: [],
+      percent: 0,
+      xp: 0
+    };
+
     if (userId) {
-      try {
-        const up = await UserMateriProgress.findOne({ 
-          where: { userId, materiId: id } 
-        });
-        
-        progress = up ? {
-          completedSections: JSON.parse(up.completedSections || '[]'),
-          percent: up.percent || 0,
-          xp: up.xp || 0
-        } : { 
-          completedSections: [], 
-          percent: 0, 
-          xp: 0 
+      const up = await UserMateriProgress.findOne({
+        where: { userId, materiId: id }
+      });
+
+      if (up) {
+        progress = {
+          completedSections: JSON.parse(up.completedSections || "[]"),
+          percent: up.percent,
+          xp: up.xp
         };
-      } catch (progressErr) {
-        console.error("Progress error:", progressErr);
-        progress = { completedSections: [], percent: 0, xp: 0 };
       }
     }
 
-    // Response
+    // 🔥 ambil XP user
+    let userXP = 0;
+    if (userId) {
+      const user = await User.findByPk(userId);
+      userXP = user?.xp || 0;
+    }
+
     res.json({
       status: true,
       data: {
-        materi: {
-          id: materi.id,
-          title: materi.title,
-          description: materi.description || ""
-        },
-        sections: sections.map(s => ({
-          id: s.id,
-          type: s.type,
-          content: s.content,
-          title: s.title,
-          order: s.order
-        })),
-        videoSection: videoSection ? {
-          id: videoSection.id,
-          type: videoSection.type,
-          content: videoSection.content,
-          title: videoSection.title
-        } : null,
-        miniLesson: miniSection ? {
-          type: miniSection.type,
-          content: miniSection.content,
-          title: miniSection.title
-        } : null,
-        clues,
-        progress
+        materi,
+        sections,
+        videoSection,
+        miniLesson: miniSection,
+        progress,
+        userXP
       }
     });
 
   } catch (err) {
-    console.error('🚨 Get Materi Detail FULL ERROR:', err);
-    res.status(500).json({ 
-      status: false, 
-      message: "Server error: " + err.message 
-    });
+    console.error(err);
+    res.status(500).json({ status: false });
   }
 };
 
