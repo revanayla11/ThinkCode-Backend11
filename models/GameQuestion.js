@@ -1,3 +1,4 @@
+// models/GameQuestion.js
 module.exports = (sequelize, DataTypes) => {
   const GameQuestion = sequelize.define('GameQuestion', {
     id: {
@@ -11,12 +12,17 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.ENUM('mcq', 'essay', 'truefalse', 'dragdrop', 'typing', 'sort'),
       defaultValue: 'mcq'
     },
-    meta: DataTypes.JSON, // Store game-specific data
+    meta: DataTypes.JSON,
     points: {
       type: DataTypes.INTEGER,
       defaultValue: 10
     }
   });
+
+  // ✅ TAMBAHKAN INI
+  GameQuestion.associate = (models) => {
+    GameQuestion.belongsTo(models.GameLevel, { foreignKey: 'levelId' });
+  };
 
   return GameQuestion;
 };

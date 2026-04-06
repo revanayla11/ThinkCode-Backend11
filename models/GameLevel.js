@@ -1,3 +1,4 @@
+// models/GameLevel.js
 module.exports = (sequelize, DataTypes) => {
   const GameLevel = sequelize.define('GameLevel', {
     id: {
@@ -8,7 +9,7 @@ module.exports = (sequelize, DataTypes) => {
     materi_id: DataTypes.INTEGER,
     levelNumber: DataTypes.INTEGER,
     title: DataTypes.STRING,
-    type: { // NEW: quiz, flashcard, memory, typing, sort
+    type: {
       type: DataTypes.ENUM('quiz', 'flashcard', 'memory', 'typing', 'sort'),
       defaultValue: 'quiz'
     },
@@ -21,6 +22,7 @@ module.exports = (sequelize, DataTypes) => {
     }
   });
 
+  // ✅ TAMBAHKAN INI - Associate function
   GameLevel.associate = (models) => {
     GameLevel.belongsTo(models.Materi, { foreignKey: 'materi_id' });
     GameLevel.belongsTo(models.Badge, { foreignKey: 'reward_badge_id' });
