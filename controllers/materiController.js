@@ -86,7 +86,7 @@ exports.deleteMateri = async (req, res) => {
   }
 };
 
-// 🆙 FIXED GET DETAIL MATERI - XP & PROGRESS AMAN
+// ================= GET DETAIL MATERI (FIX 100%) =================
 exports.getMateriDetail = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -109,30 +109,20 @@ exports.getMateriDetail = async (req, res) => {
       order: [["order", "ASC"]]
     });
 
-    // 3. Get clues
-    const clues = await Clue.findAll({
-      where: { materiId: id },
-      order: [["id", "ASC"]]
-    });
-
-    // 4. Filter sections
+    // 3. Get videoSection & miniLesson
     const videoSection = sections.find(s => s.type === "video" && s.content);
     const miniSection = sections.find(s => s.type === "mini");
 
-    // 🆙 FIXED PROGRESS & USER GLOBAL XP
-    let progress = { 
-      completedSections: [], 
-      percent: 0, 
-      xp: 0,
-      totalUserXP: 0 
-    };
+    // 4. Get USER GLOBAL XP (FIX XP = 0)
+    let userGlobalXP = 0;
+    let progress = { completedSections: [], percent: 0, xp: 0 };
     
     if (userId) {
-      // Get USER global XP
+      // 🆕 GET USER GLOBAL XP
       const user = await User.findByPk(userId);
-      const userGlobalXP = user?.xp || 0;
+      userGlobalXP = user?.xp || 0;
 
-      // Get MATERI progress
+      // 🆕 GET MATERI PROGRESS
       const up = await UserMateriProgress.findOne({ 
         where: { userId, materiId: id } 
       });
@@ -143,24 +133,20 @@ exports.getMateriDetail = async (req, res) => {
           progress = {
             completedSections: Array.isArray(completedSections) ? completedSections : [],
             percent: up.percent || 0,
-            xp: up.xp || 0,
-            totalUserXP: userGlobalXP  // 🆙 USER TOTAL XP
+            xp: up.xp || 0
           };
-        } catch (parseErr) {
-          console.error('Parse progress error:', parseErr);
-          progress = { completedSections: [], percent: 0, xp: 0, totalUserXP: userGlobalXP };
+        } catch (e) {
+          progress = { completedSections: [], percent: 0, xp: 0 };
         }
-      } else {
-        progress.totalUserXP = userGlobalXP;
       }
     }
 
-    // 🆙 DEBUG LOG
-    console.log('📊 Progress response:', {
+    // 🆕 LOG DETAIL
+    console.log('📊 Progress data:', {
       userId,
       completedSections: progress.completedSections,
-      materiXP: progress.xp,
-      totalUserXP: progress.totalUserXP
+      userGlobalXP,
+      materiXP: progress.xp
     });
 
     res.json({
@@ -171,13 +157,7 @@ exports.getMateriDetail = async (req, res) => {
           title: materi.title,
           description: materi.description || ""
         },
-        sections: sections.map(s => ({
-          id: s.id,
-          type: s.type,
-          content: s.content,
-          title: s.title,
-          order: s.order
-        })),
+        sections,
         videoSection: videoSection ? {
           id: videoSection.id,
           type: videoSection.type,
@@ -189,33 +169,35 @@ exports.getMateriDetail = async (req, res) => {
           content: miniSection.content,
           title: miniSection.title
         } : null,
-        clues,
-        progress  // 🆙 FULL PROGRESS WITH totalUserXP
+        progress, // 🆕 Materi-specific progress
+        userXP: userGlobalXP // 🆕 USER global XP
       }
     });
 
   } catch (err) {
-    console.error('🚨 Get Materi Detail FULL ERROR:', err);
-    res.status(500).json({ status: false, message: "Server error" });
+    console.error('🚨 Get Materi Detail ERROR:', err);
+    res.status(500).json({ 
+      status: false, 
+      message: "Server error" 
+    });
   }
 };
 
-// 🆙 FIXED COMPLETE STEP - NO DOUBLE, XP CORRECT
+// ================= COMPLETE STEP (FIX) =================
 exports.completeStep = async (req, res) => {
   try {
     const userId = req.user.id;
     const materiId = parseInt(req.params.id);
     const { step } = req.body;
 
-    console.log(`🎮 Complete step: ${step} | User: ${userId} | Materi: ${materiId}`);
+    console.log(`🎮 Complete step: ${step} for user ${userId}, materi ${materiId}`);
 
-    // 🆙 VALIDATE STEP
     const validSteps = ["watch_video", "open_mini_lesson"];
     if (!validSteps.includes(step)) {
       return res.status(400).json({ status: false, message: "Invalid step" });
     }
 
-    // 🆙 GET OR CREATE PROGRESS
+    // Get or create progress
     let progress = await UserMateriProgress.findOne({ where: { userId, materiId } });
     if (!progress) {
       progress = await UserMateriProgress.create({
@@ -226,54 +208,45 @@ exports.completeStep = async (req, res) => {
       });
     }
 
-    // 🆙 PARSE COMPLETED SECTIONS
-    let completedSections = [];
-    try {
-      completedSections = JSON.parse(progress.completedSections || '[]');
-      completedSections = Array.isArray(completedSections) ? completedSections : [];
-    } catch (e) {
-      completedSections = [];
-    }
+    let completedSections = JSON.parse(progress.completedSections || '[]');
+    completedSections = Array.isArray(completedSections) ? completedSections : [];
 
-    // 🆙 CHECK ALREADY COMPLETED
+    // Check if already completed
     if (completedSections.includes(step)) {
-      console.log(`⚠️ ${step} already completed`);
-      const user = await User.findByPk(userId);
       return res.json({
         status: true,
+        message: "Already completed",
         xpGain: 0,
-        totalXP: user.xp || 0,
-        materiXP: progress.xp || 0,
-        percent: progress.percent || 0,
+        totalXP: (await User.findByPk(userId)).xp || 0,
         completedSteps: completedSections
       });
     }
 
-    // 🆙 CALCULATE REWARDS
-    const xpGain = XP_MAP[step] || 0;
+    // Add step & calculate XP
     completedSections.push(step);
+    const xpGain = step === "watch_video" ? 10 : 15;
     const newMateriXP = (progress.xp || 0) + xpGain;
-    const percent = Math.min(100, Math.round((completedSections.length / validSteps.length) * 100));
+    const percent = Math.min(100, Math.round((completedSections.length / 2) * 100));
 
-    // 🆙 UPDATE MATERI PROGRESS
+    // Update materi progress
     await progress.update({
       completedSections: JSON.stringify(completedSections),
       percent,
       xp: newMateriXP
     });
 
-    // 🆙 UPDATE USER GLOBAL XP
+    // Update USER global XP
     const user = await User.findByPk(userId);
     const newTotalXP = (user.xp || 0) + xpGain;
     await user.update({ xp: newTotalXP });
 
-    console.log(`✅ ${step} COMPLETED! +${xpGain}XP | MateriXP: ${newMateriXP} | TotalXP: ${newTotalXP}`);
+    console.log(`✅ Step ${step} completed. XP: +${xpGain}, Total: ${newTotalXP}`);
 
     res.json({
       status: true,
       xpGain,
-      totalXP: newTotalXP,        // 🆙 USER GLOBAL XP
-      materiXP: newMateriXP,      // 🆙 MATERI XP
+      totalXP: newTotalXP,
+      materiXP: newMateriXP,
       percent,
       completedSteps: completedSections
     });
@@ -284,7 +257,7 @@ exports.completeStep = async (req, res) => {
   }
 };
 
-// ================= UPDATE PROGRESS (Legacy) =================
+// ================= UPDATE PROGRESS (Legacy - untuk sections) =================
 exports.updateProgress = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -292,7 +265,10 @@ exports.updateProgress = async (req, res) => {
     const { completedSections } = req.body;
     
     if (!Array.isArray(completedSections)) {
-      return res.status(400).json({ status: false, message: "completedSections harus array" });
+      return res.status(400).json({ 
+        status: false, 
+        message: "completedSections harus array" 
+      });
     }
 
     const totalSections = await MateriSection.count({ where: { materiId } });
