@@ -37,6 +37,36 @@ exports.getGameMap = async (req, res) => {
   }
 };
 
+// controllers/gameController.js - TAMBAH INI
+exports.getLevels = async (req, res) => {
+  try {
+    const levels = await GameLevel.findAll({
+      include: [{
+        model: Materi, 
+        attributes: ['id', 'title'],
+        as: 'Materi'
+      }],
+      order: [['materi_id', 'ASC'], ['levelNumber', 'ASC']],
+      where: { isActive: true }
+    });
+
+    const transformedLevels = levels.map(lvl => ({
+      id: lvl.id,
+      materiId: lvl.materi_id,
+      materiName: lvl.Materi.title,
+      levelNumber: lvl.levelNumber,
+      title: lvl.title,
+      type: lvl.type || 'quiz',
+      reward_xp: lvl.reward_xp
+    }));
+
+    res.json({ status: true, levels: transformedLevels });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: err.message });
+  }
+};
+
 exports.getProgress = async (req, res) => {
   try {
     const progress = await UserProgress.findAll({

@@ -4,12 +4,15 @@ const router = express.Router();
 const verifyToken = require("../middleware/verifyToken");
 const gameController = require("../controllers/gameController");
 
-// Public routes
-router.get("/map", gameController.getGameMap);
-router.get("/level/:id", gameController.getLevel);
+// PUBLIC ROUTES
+router.get("/map", gameController.getGameMap);     // ✅ UNTUK GAMEMAP
+router.get("/level/:id", gameController.getLevel); // ✅ UNTUK PLAY LEVEL
+router.get("/levels", gameController.getLevels);   // ✅ TAMBAH INI
 
-// Protected routes
+// PROTECTED ROUTES
 router.get("/progress", verifyToken, gameController.getProgress);
 router.post("/submit/:id", verifyToken, gameController.submitLevel);
+
+
 
 module.exports = router;
