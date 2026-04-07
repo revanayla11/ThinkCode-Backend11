@@ -777,43 +777,43 @@ END`,
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
-    
     console.log(`🔍 Validating room ${roomId}`);
     
-    // Get all data
-    const [workspace, room, officialAnswer] = await Promise.all([
-      Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
-      DiscussionRoom.findByPk(roomId),
-      MateriAnswer.findOne({ where: { materiId: parseInt(room.materiId) } })
-    ]);
+    // 🔥 GET WORKSPACE DULU - INDEPENDEN
+    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
     
-    // Check existence
-    if (!workspace) return res.json({ valid: false, score: 20, message: "Workspace belum dibuat" });
-    if (!room) return res.json({ valid: false, score: 0, message: "Room tidak ditemukan" });
-    if (!officialAnswer) return res.json({ valid: false, score: 0, message: "Jawaban guru belum ada" });
+    if (!workspace) {
+      return res.json({ 
+        valid: false, 
+        score: 0, 
+        message: "Workspace belum dibuat. Save pseudocode & flowchart dulu!",
+        details: { pseudocodeMatch: false, flowchartMatch: false }
+      });
+    }
     
-    // Pseudocode check
+    // 🔥 CHECK PSEUDOCODE
     const hasPseudo = !!workspace.pseudocode?.trim();
-    const pseudoScore = hasPseudo ? 95 : 0;
+    const pseudoScore = hasPseudo ? 50 : 0;
     
-    // Flowchart check
-    let flowScore = 0;
+    // 🔥 CHECK FLOWCHART
     let hasFlowchart = false;
+    let flowScore = 0;
     try {
       const flowData = workspace.flowchart;
       if (flowData) {
         const parsed = typeof flowData === 'string' ? JSON.parse(flowData) : flowData;
         hasFlowchart = Array.isArray(parsed.conditions) && parsed.conditions.length > 0;
-        flowScore = hasFlowchart ? 95 : 0;
+        flowScore = hasFlowchart ? 50 : 0;
       }
     } catch (e) {
-      console.log(`Flow parse error room ${roomId}:`, e.message);
+      console.log(`Flow parse error:`, e.message);
     }
     
-    const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
-    const valid = totalScore >= 85;
+    // 🔥 TOTAL - SIMPEL 50/50
+    const totalScore = Math.round(pseudoScore + flowScore);
+    const valid = totalScore >= 90; // Harus 2/2
     
-    console.log(`📊 room ${roomId}: pseudo=${pseudoScore}% flow=${flowScore}% total=${totalScore}% valid=${valid}`);
+    console.log(`✅ room ${roomId}: pseudo=${pseudoScore} flow=${flowScore} total=${totalScore}`);
 
     res.json({
       valid,
@@ -823,18 +823,43 @@ exports.validateWorkspace = async (req, res) => {
         pseudocodeSimilarity: pseudoScore,
         flowchartMatch: hasFlowchart,
         flowchartScore: flowScore,
-        hasWorkspace: !!workspace,
-        hasOfficial: !!officialAnswer
+        hasWorkspace: true
       }
     });
 
   } catch (error) {
-    console.error(`validateWorkspace ${req.params.roomId} ERROR:`, error);
+    console.error(`❌ validateWorkspace ${req.params.roomId}:`, error);
     res.status(500).json({ 
       valid: false, 
       score: 0, 
-      error: error.message 
+      error: "Server error - cek console",
+      details: { error: error.message }
     });
+  }
+};
+
+// 🔥 DEBUG ENDPOINT - Tambah ini
+exports.debugRoom = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    const [workspace, room] = await Promise.all([
+      Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
+      DiscussionRoom.findByPk(roomId)
+    ]);
+    
+    res.json({
+      roomId,
+      roomExists: !!room,
+      roomMateriId: room?.materiId,
+      workspaceExists: !!workspace,
+      hasPseudo: !!workspace?.pseudocode?.trim(),
+      hasFlow: !!workspace?.flowchart,
+      flowParsed: workspace?.flowchart ? 
+        (typeof workspace.flowchart === 'string' ? 'JSON string OK' : 'Object OK') : 'No flowchart'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
