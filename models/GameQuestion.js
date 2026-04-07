@@ -1,47 +1,15 @@
-// models/GameQuestion.js
-module.exports = (sequelize, DataTypes) => {
-  const GameQuestion = sequelize.define("GameQuestion", {
-    id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    levelId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: 'levelId'
-    },
-    content: {
-      type: DataTypes.TEXT,
-      allowNull: false
-    },
-    type: {
-      type: DataTypes.ENUM(
-        "mcq", "essay", "truefalse", "dragdrop", 
-        "typing", "sort", "memory", "flashcard", "hangman"
-      ),
-      defaultValue: "mcq",
-    },
-    meta: {
-      type: DataTypes.JSON,
-      allowNull: true
-    },
-    points: {
-      type: DataTypes.INTEGER,
-      defaultValue: 10,
-    },
-    order: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0
-    }
-  });
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/db");
 
-  GameQuestion.associate = (models) => {
-    GameQuestion.belongsTo(models.GameLevel, {
-      foreignKey: "levelId",
-      as: 'Level'
-    });
-  };
+const GameQuestion = sequelize.define("GameQuestion", {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  levelId: { type: DataTypes.INTEGER, allowNull: false },
+  type: { type: DataTypes.STRING, allowNull: false }, 
+  content: { type: DataTypes.TEXT, allowNull: false }, 
+  meta: { type: DataTypes.TEXT, allowNull: true },
+}, {
+  tableName: "game_questions",
+  timestamps: false
+});
 
-  return GameQuestion;
-};
+module.exports = GameQuestion;
