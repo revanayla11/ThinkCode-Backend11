@@ -46,4 +46,5 @@ router.get("/upload/:roomId/check", verifyToken, discussionController.checkAllTa
 // routes/discussion.js - TAMBAHKAN INI
 router.post("/room/:roomId/task/:taskId/toggle", verifyToken, discussionController.toggleTask); // ✅ NEW
 
+module.exports = router;
 
