@@ -22,10 +22,6 @@ const Submission = require("./Submission");
 const UserProgress = require("./UserProgress");
 const TeacherFeedback = require("./TeacherFeedback");
 const sequelize = require("../config/db");
-const Level = require("./Level");
-const Question = require("./Question");
-const UserGameProgress = require("./UserGameProgress");
-const Game = require("./Game");
 
 MateriSection.belongsTo(Materi, { foreignKey: "materiId" });
 DiscussionRoom.belongsTo(Materi, { foreignKey: "materiId" });
@@ -119,10 +115,8 @@ module.exports = {
   Badge,
   UserBadge,
   Clue,
-  Game,
-  Level,
-  Question,
-  UserGameProgress,
+  GameLevel,
+  GameQuestion,
   DiscussionClueLog,
   RoomMember,
   Workspace,
