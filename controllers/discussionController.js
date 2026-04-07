@@ -825,7 +825,7 @@ exports.validateWorkspace = async (req, res) => {
 exports.startRoomTimer = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const duration = 3600 * 1000; // 60 minutes
+    const duration = 5400 * 1000; // 60 minutes
     const timerEnd = new Date(Date.now() + duration);
     
     await DiscussionRoom.update(
@@ -851,7 +851,7 @@ exports.checkTimerStatus = async (req, res) => {
     const room = await DiscussionRoom.findByPk(roomId);
     
     if (!room?.timerEnd) {
-      return res.json({ timeLeft: 3600, overtimeMinutes: 0, penaltyXP: 0, expired: false });
+      return res.json({ timeLeft: 5400, overtimeMinutes: 0, penaltyXP: 0, expired: false });
     }
     
     const now = Date.now();
@@ -883,6 +883,25 @@ exports.getWorkspaceAttempts = async (req, res) => {
     res.json({ status: true, data: attempts });
   } catch (err) {
     console.error("getWorkspaceAttempts:", err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// discussionController.js - TAMBAHKAN INI
+exports.toggleTask = async (req, res) => {
+  try {
+    const { roomId, taskId } = req.params;
+    const { done } = req.body;
+
+    await RoomTaskProgress.upsert({
+      roomId: parseInt(roomId),
+      taskId: parseInt(taskId),
+      done: !!done
+    });
+
+    res.json({ status: true, message: "Task updated" });
+  } catch (err) {
+    console.error("toggleTask error:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };

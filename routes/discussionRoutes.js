@@ -43,4 +43,7 @@ router.put("/task/:roomId/:taskId", verifyToken, discussionController.updateTask
 // ================= UPLOAD CHECK =================
 router.get("/upload/:roomId/check", verifyToken, discussionController.checkAllTasksDone);
 
-module.exports = router;
+// routes/discussion.js - TAMBAHKAN INI
+router.post("/room/:roomId/task/:taskId/toggle", verifyToken, discussionController.toggleTask); // ✅ NEW
+
+
