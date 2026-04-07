@@ -5,6 +5,7 @@ const gameController = require("../controllers/gameController");
 
 // PUBLIC ROUTES
 router.get("/map", gameController.getGameMap);
+router.get("/levels", gameController.getGameMap);  // ← INI BARU!
 router.get("/level/:id", gameController.getLevel);
 router.get("/leaderboard", gameController.getLeaderboard);
 

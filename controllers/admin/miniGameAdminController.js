@@ -25,28 +25,46 @@ exports.getMateri = async (req, res) => {
 };
 
 // ==================== LEVEL ====================
+// GANTI handler getLevelsByMateri dengan ini (TEMPORARY untuk debug)
 exports.getLevelsByMateri = async (req, res) => {
   try {
+    console.log('🔍 PARAMS:', req.params);
+    console.log('🔍 SLUG:', req.params.slug);
+    
     const { slug } = req.params;
 
+    // Cek materi
     const materi = await Materi.findOne({ where: { slug } });
+    console.log('🔍 MATERI:', materi);
+    
     if (!materi) {
-      return res.status(404).json({ success: false, message: "Materi not found" });
+      console.log('❌ MATERI NOT FOUND');
+      return res.status(404).json({ success: false, message: "Materi not found", slug });
     }
 
+    // Cek levels
     const levels = await GameLevel.findAll({
       where: { materi_id: materi.id },
       order: [["levelNumber", "ASC"]],
-      include: {
+      include: [{
         model: Badge,
         attributes: ["id", "badge_name", "image"],
-      },
+        required: false  // ← CRUCIAL: tambahkan ini
+      }],
     });
+    
+    console.log('✅ LEVELS FOUND:', levels.length);
+    console.log('✅ LEVELS DATA:', levels);
 
     res.json({ success: true, data: levels });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
+    console.error('💥 ERROR getLevelsByMateri:', err);
+    console.error('💥 ERROR STACK:', err.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message,
+      slug: req.params.slug 
+    });
   }
 };
 
