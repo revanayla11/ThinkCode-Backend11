@@ -38,50 +38,22 @@ exports.getRoomPerformance = async (req, res) => {
   try {
     const { roomId } = req.params;
 
-    // 1️⃣ Hitung clue used (DiscussionClueLog)
-    const usedClues = await DiscussionClueLog.count({
-      where: { roomId }
-    });
-
-    // 2️⃣ Hitung total attempt (pseudocode + flowchart)
-    const pseudoAttempts = await WorkspaceAttempt.count({
-      where: { roomId, type: "pseudocode" }
-    });
-    const flowchartAttempts = await WorkspaceAttempt.count({
-      where: { roomId, type: "flowchart" }
-    });
+    const usedClues = await DiscussionClueLog.count({ where: { roomId } });
+    const pseudoAttempts = await WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" } });
+    const flowchartAttempts = await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" } });
     const totalAttempts = pseudoAttempts + flowchartAttempts;
 
-    // 3️⃣ Cek apakah semua task selesai
-    const tasks = await RoomTaskProgress.findAll({
-      where: { roomId }
-    });
+    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
     const allDone = tasks.length === 5 && tasks.every(t => t.done);
 
-    // 4️⃣ Hitung score - ✅ LOGIKA BARU
     let score = 100;
-
-    // Penalty clue: -10 per clue (max 3 clues = -30)
     score -= usedClues * 10;
-    
-    // Penalty attempt: -5 per attempt di atas 3 kali total
     const attemptsAbove3 = Math.max(0, totalAttempts - 3);
     score -= attemptsAbove3 * 5;
-    
-    // Penalty task belum selesai: -20
     if (!allDone) score -= 20;
-
     if (score < 0) score = 0;
 
-    console.log(`📊 Performance room ${roomId}:`, {
-      usedClues,
-      pseudoAttempts,
-      flowchartAttempts,
-      totalAttempts,
-      attemptsAbove3,
-      allDone,
-      score
-    });
+    console.log(`📊 Performance room ${roomId}:`, { usedClues, totalAttempts, allDone, score });
 
     res.json({
       score: Math.round(score),
@@ -96,7 +68,6 @@ exports.getRoomPerformance = async (req, res) => {
         taskPenalty: allDone ? 0 : 20
       }
     });
-
   } catch (error) {
     console.error("Error getRoomPerformance:", error);
     res.status(500).json({ message: "Server error", score: 0 });
@@ -107,12 +78,7 @@ exports.getRoomPerformance = async (req, res) => {
 exports.getRooms = async (req, res) => {
   try {
     const materiId = req.params.materiId;
-
-    if (!materiId)
-      return res.status(400).json({
-        status: false,
-        message: "materiId diperlukan",
-      });
+    if (!materiId) return res.status(400).json({ status: false, message: "materiId diperlukan" });
 
     const rooms = await DiscussionRoom.findAll({
       where: { materiId },
@@ -121,13 +87,8 @@ exports.getRooms = async (req, res) => {
 
     const roomsWithCurrent = await Promise.all(
       rooms.map(async (room) => {
-        const current = await UserMateriProgress.count({
-          where: { roomId: room.id },
-        });
-        return {
-          ...room.toJSON(),
-          current,
-        };
+        const current = await UserMateriProgress.count({ where: { roomId: room.id } });
+        return { ...room.toJSON(), current };
       })
     );
 
@@ -142,7 +103,6 @@ exports.getRooms = async (req, res) => {
 exports.getRoom = async (req, res) => {
   try {
     const { roomId } = req.params;
-
     const messages = await DiscussionMessage.findAll({
       where: { roomId },
       include: [{ model: User, attributes: ["name"] }],
@@ -173,11 +133,9 @@ exports.sendMessage = async (req, res) => {
     const { roomId } = req.params;
     const { message } = req.body;
 
-    if (!message || !message.trim())
-      return res.status(400).json({
-        status: false,
-        message: "Pesan kosong",
-      });
+    if (!message || !message.trim()) {
+      return res.status(400).json({ status: false, message: "Pesan kosong" });
+    }
 
     const newMsg = await DiscussionMessage.create({
       roomId,
@@ -210,16 +168,14 @@ exports.sendMessage = async (req, res) => {
 exports.getMiniLesson = async (req, res) => {
   try {
     const { materiId } = req.params;
+    const mini = await MateriSection.findOne({ where: { materiId, type: "mini" } });
 
-    const mini = await MateriSection.findOne({
-      where: { materiId, type: "mini" },
-    });
-
-    if (!mini)
+    if (!mini) {
       return res.json({
         status: false,
         message: "Mini lesson tidak ditemukan",
       });
+    }
 
     res.json({ status: true, data: mini });
   } catch (err) {
@@ -232,12 +188,8 @@ exports.getMiniLesson = async (req, res) => {
 exports.getClues = async (req, res) => {
   try {
     const { materiId } = req.params;
-
     if (!materiId) {
-      return res.status(400).json({
-        status: false,
-        message: "materiId diperlukan",
-      });
+      return res.status(400).json({ status: false, message: "materiId diperlukan" });
     }
 
     const clues = await Clue.findAll({
@@ -256,10 +208,7 @@ exports.getClues = async (req, res) => {
     });
   } catch (err) {
     console.error("getClues error:", err);
-    res.status(500).json({
-      status: false,
-      message: "Server error",
-    });
+    res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
@@ -272,68 +221,51 @@ exports.useClue = async (req, res) => {
     const clueId = parseInt(clueIdStr, 10);
     const userId = req.user.id;
 
-    // Validasi
     if (isNaN(roomId) || roomId <= 0) return res.status(400).json({ message: "roomId tidak valid" });
     if (isNaN(clueId) || clueId <= 0) return res.status(400).json({ message: "clueId tidak valid" });
 
-    // Ambil room
     const room = await DiscussionRoom.findByPk(roomId, { transaction });
     if (!room) return res.status(404).json({ message: "Room tidak ditemukan" });
     if (!room.materiId) return res.status(400).json({ message: "Room tidak punya materiId" });
 
-    // Ambil clue
     const clue = await Clue.findByPk(clueId, { transaction });
     if (!clue) return res.status(404).json({ message: "Clue tidak ditemukan" });
 
-    // Cek sudah used
     const alreadyUsed = await DiscussionClueLog.findOne({ where: { roomId, clueId }, transaction });
     if (alreadyUsed) return res.status(400).json({ message: "Clue ini sudah digunakan di room ini" });
 
-    // Ambil members dan sync XP dulu
     const members = await UserMateriProgress.findAll({
       where: { materiId: room.materiId, roomId },
       transaction,
     });
 
-    console.log("Members found:", members.length, members.map(m => ({ id: m.userId, xp: m.xp })));
-
     if (!members.length) {
       await transaction.rollback();
-      return res.status(400).json({ message: "Tidak ada anggota di room. Pastikan sudah join room dengan benar." });
+      return res.status(400).json({ message: "Tidak ada anggota di room" });
     }
 
-    const cost = Number(clue.cost || 0);
-    // Cek dan potong XP dari kedua tabel
+    const cost = Number(clue.cost || 50);
     for (const member of members) {
-      // Sync XP dulu jika perlu (pastikan up-to-date dari Users)
       await exports.syncUserXp(member.userId, room.materiId, transaction);
-
-      // Reload member untuk dapat XP terbaru
       await member.reload({ transaction });
-      console.log(`Checking XP for user ${member.userId}: ${member.xp} >= ${cost}`);
 
       if (member.xp < cost) {
         await transaction.rollback();
         return res.status(400).json({
-          message: `XP anggota ${member.userId} tidak mencukupi (diperlukan ${cost} XP). Dapatkan XP tambahan di halaman Mini Game.`,
+          message: `XP anggota ${member.userId} tidak cukup (${member.xp}/${cost}). Semua anggota butuh ${cost} XP.`,
         });
       }
 
-      // Potong dari UserMateriProgress
       member.xp -= cost;
       await member.save({ transaction });
 
-      // Potong dari Users juga
       await User.update(
         { xp: User.sequelize.literal(`xp - ${cost}`) },
         { where: { id: member.userId }, transaction }
       );
     }
 
-    // Simpan log clue
     await DiscussionClueLog.create({ roomId, clueId, takenBy: userId }, { transaction });
-
-    // Simpan chat history
     await DiscussionMessage.create({
       roomId,
       userId,
@@ -354,13 +286,9 @@ exports.useClue = async (req, res) => {
 exports.getUsedClues = async (req, res) => {
   try {
     const { roomId } = req.params;
-
     const logs = await DiscussionClueLog.findAll({
       where: { roomId },
-      include: [
-        { model: Clue },
-        { model: User, attributes: ["name"] },
-      ],
+      include: [{ model: Clue }, { model: User, attributes: ["name"] }],
       order: [["createdAt", "ASC"]],
     });
 
@@ -392,23 +320,12 @@ exports.joinRoom = async (req, res) => {
     }
 
     const materiId = room.materiId;
-
-    // Sync XP dari Users ke UserMateriProgress
     await exports.syncUserXp(userId, materiId, transaction);
 
-    let progress = await UserMateriProgress.findOne({
-      where: { userId, materiId },
-      transaction,
-    });
-
+    let progress = await UserMateriProgress.findOne({ where: { userId, materiId }, transaction });
     if (!progress) {
       progress = await UserMateriProgress.create({
-        userId,
-        materiId,
-        xp: 0,  // Akan di-sync di atas
-        completedSections: "[]",
-        percent: 0,
-        roomId: null,
+        userId, materiId, xp: 0, completedSections: "[]", percent: 0, roomId: null
       }, { transaction });
     }
 
@@ -416,22 +333,15 @@ exports.joinRoom = async (req, res) => {
       await transaction.rollback();
       return res.status(400).json({
         status: false,
-        message: `Anda sudah join Room ${progress.roomId}. Tidak bisa join room lain.`,
+        message: `Anda sudah join Room ${progress.roomId}`,
       });
     }
 
     await progress.update({ roomId: parseInt(roomId) }, { transaction });
 
-    const alreadyMember = await RoomMember.findOne({
-      where: { room_id: roomId, user_id: userId },
-      transaction,
-    });
-
+    const alreadyMember = await RoomMember.findOne({ where: { room_id: roomId, user_id: userId }, transaction });
     if (!alreadyMember) {
-      await RoomMember.create({
-        room_id: roomId,
-        user_id: userId,
-      }, { transaction });
+      await RoomMember.create({ room_id: roomId, user_id: userId }, { transaction });
     }
 
     await transaction.commit();
@@ -443,34 +353,27 @@ exports.joinRoom = async (req, res) => {
   }
 };
 
-/* ================= CAN USE CLUE ================= */
+/* ================= CAN USE CLUE (EACH MEMBER 50 XP) ================= */
 exports.canUseClue = async (req, res) => {
   try {
-    const { roomId, clueId } = req.params;
-    const userId = req.user.id;
-
+    const { roomId } = req.params;
     const room = await DiscussionRoom.findByPk(roomId);
     if (!room) return res.status(404).json({ status: false, message: "Room tidak ditemukan" });
 
-    const clue = await Clue.findByPk(clueId);
-    if (!clue) return res.status(404).json({ status: false, message: "Clue tidak ditemukan" });
-
     const members = await UserMateriProgress.findAll({
-      where: { materiId: room.materiId, roomId },
+      where: { materiId: room.materiId, roomId }
     });
 
-    const cost = clue.cost;
-    let canUse = true;
-    let message = "XP cukup untuk semua anggota.";
-    for (const member of members) {
-      if (member.xp < cost) {
-        canUse = false;
-        message = `XP anggota tidak cukup. Dapatkan XP di Game/Mini Game.`;
-        break;
-      }
-    }
-
-    res.json({ status: true, canUse, message });
+    const minXP = 50;
+    const allHaveEnough = members.every(member => member.xp >= minXP);
+    
+    res.json({ 
+      status: true, 
+      canUse: allHaveEnough, 
+      message: allHaveEnough ? "✅ Semua anggota punya cukup XP!" : "❌ Semua anggota butuh minimal 50 XP masing-masing",
+      memberXP: members.map(m => ({ userId: m.userId, xp: m.xp, enough: m.xp >= minXP })),
+      required: minXP
+    });
   } catch (err) {
     res.status(500).json({ status: false, message: "Server error" });
   }
@@ -481,14 +384,53 @@ exports.getUserXp = async (req, res) => {
   try {
     const { materiId } = req.params;
     const userId = req.user.id;
-
-    const progress = await UserMateriProgress.findOne({
-      where: { userId, materiId },
-      attributes: ['xp'],
-    });
-
+    const progress = await UserMateriProgress.findOne({ where: { userId, materiId }, attributes: ['xp'] });
     res.json({ status: true, xp: progress?.xp || 0 });
   } catch (err) {
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+/* ================= NEW: GET WORKSPACE DATA (COMPLETE) ================= */
+exports.getWorkspaceData = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const workspace = await Workspace.findOne({ where: { roomId } });
+    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
+    
+    const taskMap = {};
+    tasks.forEach(t => { taskMap[t.taskId] = t.done; });
+    for (let i = 1; i <= 5; i++) {
+      if (!taskMap[i]) taskMap[i] = false;
+    }
+    
+    res.json({ 
+      status: true, 
+      data: { 
+        pseudocode: workspace?.pseudocode || "",
+        flowchart: workspace?.flowchart || { conditions: [], elseInstruction: "" },
+        tasks: taskMap 
+      } 
+    });
+  } catch (err) {
+    console.error("getWorkspaceData:", err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+/* ================= NEW: GET TASKS ================= */
+exports.getTaskProgress = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
+    const taskMap = {};
+    tasks.forEach(t => { taskMap[t.taskId] = t.done; });
+    for (let i = 1; i <= 5; i++) {
+      if (!taskMap[i]) taskMap[i] = false;
+    }
+    res.json({ status: true, data: taskMap });
+  } catch (err) {
+    console.error("getTaskProgress:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
@@ -500,21 +442,12 @@ exports.savePseudocode = async (req, res) => {
     const { pseudocode } = req.body;
 
     if (!pseudocode || !pseudocode.trim()) {
-      return res.status(400).json({
-        status: false,
-        message: "Pseudocode tidak boleh kosong",
-      });
+      return res.status(400).json({ status: false, message: "Pseudocode tidak boleh kosong" });
     }
 
-    const attemptCount = await WorkspaceAttempt.count({
-      where: { roomId, type: "pseudocode" },
-    });
-
+    const attemptCount = await WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" } });
     if (attemptCount >= 10) {
-      return res.status(400).json({
-        status: false,
-        message: "Maksimal 10 attempt pseudocode tercapai.",
-      });
+      return res.status(400).json({ status: false, message: "Maksimal 10 attempt tercapai" });
     }
 
     await WorkspaceAttempt.create({
@@ -525,7 +458,6 @@ exports.savePseudocode = async (req, res) => {
     });
 
     let workspace = await Workspace.findOne({ where: { roomId } });
-
     if (workspace) {
       await workspace.update({ pseudocode });
     } else {
@@ -536,18 +468,9 @@ exports.savePseudocode = async (req, res) => {
       });
     }
 
-    // AUTO CHECKLIST TASK 3
-    await RoomTaskProgress.upsert({
-      roomId,
-      taskId: 3,
-      done: true,
-    });
+    await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true });
 
-    res.json({
-      status: true,
-      message: `Pseudocode disimpan (Attempt ${attemptCount + 1}/10)`,
-    });
-
+    res.json({ status: true, message: `Pseudocode disimpan (Attempt ${attemptCount + 1}/10)` });
   } catch (err) {
     console.error("savePseudocode:", err);
     res.status(500).json({ status: false, message: "Server error" });
@@ -560,15 +483,9 @@ exports.saveFlowchart = async (req, res) => {
     const { roomId } = req.params;
     const { flowchart } = req.body;
 
-    const attemptCount = await WorkspaceAttempt.count({
-      where: { roomId, type: "flowchart" },
-    });
-
+    const attemptCount = await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" } });
     if (attemptCount >= 10) {
-      return res.status(400).json({
-        status: false,
-        message: "Maksimal 10 attempt flowchart tercapai.",
-      });
+      return res.status(400).json({ status: false, message: "Maksimal 10 attempt flowchart tercapai" });
     }
 
     await WorkspaceAttempt.create({
@@ -579,9 +496,8 @@ exports.saveFlowchart = async (req, res) => {
     });
 
     let workspace = await Workspace.findOne({ where: { roomId } });
-
     if (workspace) {
-      await workspace.update({ flowchart });
+      await workspace.update({ flowchart: flowchart });
     } else {
       await Workspace.create({
         roomId,
@@ -590,18 +506,12 @@ exports.saveFlowchart = async (req, res) => {
       });
     }
 
-    // AUTO CHECKLIST TASK 4
-    await RoomTaskProgress.upsert({
-      roomId,
-      taskId: 4,
-      done: true,
-    });
+    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true });
 
     res.json({
       status: true,
       message: `Flowchart disimpan (Attempt ${attemptCount + 1}/10)`,
     });
-
   } catch (err) {
     console.error("saveFlowchart:", err);
     res.status(500).json({ status: false, message: "Server error" });
@@ -613,27 +523,15 @@ exports.getWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
     const workspace = await Workspace.findOne({ where: { roomId } });
-    res.json({ status: true, data: workspace || { pseudocode: "", flowchart: { conditions: [], elseInstruction: "" } } });
+    res.json({ 
+      status: true, 
+      data: workspace || { 
+        pseudocode: "", 
+        flowchart: { conditions: [], elseInstruction: "" } 
+      } 
+    });
   } catch (err) {
     console.error("getWorkspace:", err);
-    res.status(500).json({ status: false, message: "Server error" });
-  }
-};
-
-/* ================= GET TASK PROGRESS ================= */
-exports.getTaskProgress = async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
-    const taskMap = {};
-    tasks.forEach(t => { taskMap[t.taskId] = t.done; });
-    // Default false jika belum ada
-    for (let i = 1; i <= 5; i++) {
-      if (!taskMap[i]) taskMap[i] = false;
-    }
-    res.json({ status: true, data: taskMap });
-  } catch (err) {
-    console.error("getTaskProgress:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
@@ -650,7 +548,7 @@ exports.updateTask = async (req, res) => {
       done: !!done,
     });
 
-    res.json({ status: true, message: "Task updated." });
+    res.json({ status: true, message: "Task updated" });
   } catch (err) {
     console.error("updateTask:", err);
     res.status(500).json({ status: false, message: "Server error" });
@@ -670,32 +568,25 @@ exports.checkAllTasksDone = async (req, res) => {
   }
 };
 
-/* ================= GET WORKSPACE ATTEMPTS (FOR ADMIN) ================= */
-exports.getWorkspaceAttempts = async (req, res) => {
+/* ================= SUBMISSION STATUS ================= */
+exports.getSubmissionStatus = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const attempts = await WorkspaceAttempt.findAll({
-      where: { roomId },
-      order: [['createdAt', 'ASC']],
-    });
-    res.json({ status: true, data: attempts });
+    const room = await DiscussionRoom.findByPk(roomId);
+    res.json({ submitted: room?.isSubmitted || false });
   } catch (err) {
-    console.error("getWorkspaceAttempts:", err);
-    res.status(500).json({ status: false, message: "Server error" });
+    console.error("getSubmissionStatus:", err);
+    res.status(500).json({ submitted: false });
   }
 };
 
+/* ================= UPLOAD JAWABAN ================= */
 exports.uploadJawaban = async (req, res) => {
   try {
     const { roomId } = req.params;
 
-    const tasks = await RoomTaskProgress.findAll({
-      where: { roomId }
-    });
-
-    const allDone =
-      tasks.length === 5 &&
-      tasks.every(t => t.done);
+    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
+    const allDone = tasks.length === 5 && tasks.every(t => t.done);
 
     if (!allDone) {
       return res.status(400).json({
@@ -704,171 +595,32 @@ exports.uploadJawaban = async (req, res) => {
       });
     }
 
-    // lanjut proses upload file di sini
+    // Update room submitted status
+    await DiscussionRoom.update({ isSubmitted: true }, { where: { id: roomId } });
 
     res.json({
       status: true,
-      message: "Upload berhasil."
+      message: "Upload berhasil! Jawaban sudah disubmit."
     });
-
   } catch (err) {
-    res.status(500).json({
-      status: false,
-      message: "Server error"
-    });
+    console.error("uploadJawaban:", err);
+    res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
-exports.getSubmissionStatus = async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    // Asumsi ada model Submission atau flag di Workspace/Room
-    // Jika belum ada, default false (belum submit)
-    const submitted = false;  // Ganti dengan query nyata jika ada model Submission
-    res.json({ submitted });
-  } catch (err) {
-    console.error("getSubmissionStatus:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-// 🔥 FULL ENHANCED validateWorkspace - TEMPLATE + GURU JAWABAN
-exports.validateWorkspace = async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const userId = req.user.id;
-
-    // 1. Existing workspace check...
-    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
-    if (!workspace) return res.status(400).json({ valid: false, message: "Belum ada workspace!" });
-
-    const room = await DiscussionRoom.findByPk(roomId);
-    const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
-    if (!officialAnswer) return res.status(400).json({ valid: false, message: "Guru belum upload jawaban!" });
-
-    // 2. PSEUDOCODE VALIDATION (vs GURU)
-    const normalizeText = (text) => (text || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
-    const studentPseudo = normalizeText(workspace.pseudocode);
-    const officialPseudo = normalizeText(officialAnswer.pseudocode);
-    const pseudocodeMatch = studentPseudo === officialPseudo;
-
-    // 3. FLOWCHART VALIDATION (vs GURU)
-    const parseFlowchart = (flowData) => {
-      try {
-        return typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || { conditions: [], elseInstruction: '' };
-      } catch {
-        return { conditions: [], elseInstruction: '' };
-      }
-    };
-
-    const studentFlowchart = parseFlowchart(workspace.flowchart);
-    const officialFlowchart = parseFlowchart(officialAnswer.flowchart);
-
-    let flowchartMatch = true;
-    let flowchartDetails = {
-      conditionsCountMatch: studentFlowchart.conditions.length === officialFlowchart.conditions.length,
-      conditions: [],
-      elseMatch: normalizeText(studentFlowchart.elseInstruction) === normalizeText(officialFlowchart.elseInstruction)
-    };
-
-    const studentConditions = Array.isArray(studentFlowchart.conditions) ? studentFlowchart.conditions : [];
-    const officialConditions = Array.isArray(officialFlowchart.conditions) ? officialFlowchart.conditions : [];
-
-    if (studentConditions.length !== officialConditions.length) {
-      flowchartMatch = false;
-    } else {
-      for (let i = 0; i < studentConditions.length; i++) {
-        const studentCond = normalizeText(studentConditions[i]?.condition || '');
-        const officialCond = normalizeText(officialConditions[i]?.condition || '');
-        const studentYes = normalizeText(studentConditions[i]?.yes || '');
-        const officialYes = normalizeText(officialConditions[i]?.yes || '');
-
-        const condMatch = {
-          index: i + 1,
-          conditionMatch: studentCond === officialCond,
-          yesMatch: studentYes === officialYes
-        };
-
-        flowchartDetails.conditions.push(condMatch);
-        if (!condMatch.conditionMatch || !condMatch.yesMatch) {
-          flowchartMatch = false;
-        }
-      }
-    }
-
-    // 🔥 4. TEMPLATE BLANK VALIDATION (BONUS)
-    const templateData = await exports.getPseudocodeTemplate({ params: { roomId } }, { json: () => ({}) });
-    const { blanks } = templateData.data.data;
-    
-    // Extract student answers from filled template
-    const studentBlanks = extractBlanksFromCode(workspace.pseudocode, blanks);
-    const blankValidation = blanks.map((blank, i) => ({
-      blankId: i,
-      position: blank.position,
-      student: studentBlanks[i] || '',
-      expected: blank.expected,
-      correct: normalizeText(studentBlanks[i]) === normalizeText(blank.expected),
-      hint: blank.hint
-    }));
-
-    const blanksCorrect = blankValidation.every(b => b.correct);
-
-    const isValid = pseudocodeMatch && flowchartMatch && blanksCorrect;
-
-    res.json({
-      valid: isValid,
-      details: {
-        pseudocodeMatch,
-        flowchartMatch,
-        blanksCorrect,
-        blankValidation,
-        flowchartDetails,
-        smartHints: blankValidation
-          .filter(b => !b.correct)
-          .map(b => `Blank ${b.blankId + 1}: ${b.hint}`),
-        pseudocode: {
-          student: workspace.pseudocode?.trim(),
-          official: officialAnswer.pseudocode?.trim(),
-          match: pseudocodeMatch
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error("Validation error:", error);
-    res.status(500).json({ valid: false, message: "Server error" });
-  }
-};
-
-// 🔥 HELPER untuk extract blanks
-const extractBlanksFromCode = (code, blanks) => {
-  const lines = code.split('\n');
-  return blanks.map(blank => {
-    // Simple keyword extraction based on position
-    for (let line of lines) {
-      const normLine = normalizeText(line);
-      if (normLine.includes(normalizeText(blank.expected))) {
-        return line.trim().split(' ').find(word => 
-          normalizeText(word) === normalizeText(blank.expected)
-        ) || '';
-      }
-    }
-    return '';
-  });
-};
-
+/* ================= PSEUDOCODE TEMPLATE (DYNAMIC BY MATERI) ================= */
 exports.getPseudocodeTemplate = async (req, res) => {
   try {
     const { roomId } = req.params;
     const room = await DiscussionRoom.findByPk(roomId);
     if (!room) return res.status(404).json({ status: false, message: "Room not found" });
 
+    const materiId = room.materiId.toString();
     let template, blanks, expectedFull, materiType;
 
-    // 🔥 DYNAMIC TEMPLATE BERDASARKAN MATERI ID
-    switch (room.materiId.toString()) {
-      // 📝 MATERI 1: SIMPLE IF
-      case 'if-simple':
+    switch (materiId) {
+      // MATERI 1: SIMPLE IF
+      case '1':
         template = `DEKLARASI
     angka : integer
 
@@ -880,19 +632,17 @@ ALGORITMA
     ENDIF
 
 END`;
-
         blanks = [
           { id: 0, hint: "Nama variabel input", expected: "angka", position: "read" },
           { id: 1, hint: "Variabel kondisi", expected: "angka", position: "IF" },
           { id: 2, hint: "Variabel output", expected: "angka", position: "write" }
         ];
-
-        expectedFull = template; // No blanks for simple IF
+        expectedFull = template;
         materiType = "if-simple";
         break;
 
-      // 🔀 MATERI 2: IF-ELSE
-      case 'if-else':
+      // MATERI 2: IF-ELSE
+      case '2':
         template = `DEKLARASI
     angka : integer
 
@@ -906,31 +656,17 @@ ALGORITMA
     ___BLANK_2___
 
 END`;
-
         blanks = [
-          { id: 0, hint: "Struktur untuk kondisi kedua", expected: "ELSE", position: "struktur" },
-          { id: 1, hint: "Hasil untuk angka negatif", expected: "Negatif", position: "output" },
-          { id: 2, hint: "Menutup struktur IF", expected: "ENDIF", position: "penutup" }
+          { id: 0, hint: "Struktur kondisi kedua", expected: "ELSE", position: "struktur" },
+          { id: 1, hint: "Hasil angka negatif", expected: "Negatif", position: "output" },
+          { id: 2, hint: "Penutup struktur", expected: "ENDIF", position: "penutup" }
         ];
-
-        expectedFull = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
-    
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ELSE
-        write("Angka ", angka, " adalah Negatif")
-    ENDIF
-
-END`;
+        expectedFull = template.replace('___BLANK_0___', 'ELSE').replace('___BLANK_1___', 'Negatif').replace('___BLANK_2___', 'ENDIF');
         materiType = "if-else";
         break;
 
-      // 🔀🔀 MATERI 3: IF-ELSE-IF
-      case 'if-elseif':
+      // MATERI 3: IF-ELSE-IF
+      case '3':
         template = `DEKLARASI
     angka : integer
 
@@ -946,33 +682,15 @@ ALGORITMA
     ___BLANK_2___
 
 END`;
-
         blanks = [
-          { id: 0, hint: "Kondisi kedua (negatif)", expected: "ELSE IF", position: "kedua" },
+          { id: 0, hint: "Kondisi kedua", expected: "ELSE IF", position: "kedua" },
           { id: 1, hint: "Kondisi terakhir", expected: "ELSE", position: "terakhir" },
-          { id: 2, hint: "Menutup semua kondisi", expected: "ENDIF", position: "penutup" }
+          { id: 2, hint: "Penutup semua", expected: "ENDIF", position: "penutup" }
         ];
-
-        expectedFull = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
-    
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ELSE IF (angka < 0) THEN
-        write("Angka ", angka, " adalah Negatif")
-    ELSE
-        write("Angka ", angka, " adalah Nol")
-    ENDIF
-
-END`;
         materiType = "if-elseif";
         break;
 
       default:
-        // FALLBACK - Simple IF
         template = `DEKLARASI
     ___BLANK_0___ : integer
 
@@ -984,26 +702,13 @@ ALGORITMA
     ENDIF
 
 END`;
-
         blanks = [
-          { id: 0, hint: "Nama variabel", expected: "angka", position: "deklarasi" },
-          { id: 1, hint: "Input variabel", expected: "angka", position: "read" },
-          { id: 2, hint: "Kondisi variabel", expected: "angka", position: "IF" },
-          { id: 3, hint: "Output variabel", expected: "angka", position: "write" },
-          { id: 4, hint: "Hasil positif", expected: "Positif", position: "output" }
+          { id: 0, hint: "Nama variabel", expected: "angka" },
+          { id: 1, hint: "Input variabel", expected: "angka" },
+          { id: 2, hint: "Kondisi variabel", expected: "angka" },
+          { id: 3, hint: "Output variabel", expected: "angka" },
+          { id: 4, hint: "Hasil positif", expected: "Positif" }
         ];
-
-        expectedFull = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
-    
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ENDIF
-
-END`;
         materiType = "default";
     }
 
@@ -1015,24 +720,112 @@ END`;
         expectedFull,
         materiType,
         totalBlanks: blanks.length,
-        instruction: `Fill ${blanks.length} blanks to complete the algorithm!`
+        instruction: `Isi ${blanks.length} blank untuk melengkapi algoritma!`
       }
     });
   } catch (error) {
-    console.error("Template error:", error);
+    console.error("getPseudocodeTemplate error:", error);
     res.status(500).json({ 
       status: false, 
-      message: "Failed to load template",
-      data: { template: "ALGORITMA\n    read(input)\n    IF (input > 0) THEN\n        write('Positif')\n    ENDIF\nEND" }
+      message: "Gagal load template",
+      data: { 
+        template: "ALGORITMA\n    read(input)\n    IF (input > 0) THEN\n        write('Positif')\n    ENDIF\nEND",
+        blanks: [],
+        materiType: "default"
+      }
     });
   }
 };
 
-// 🔥 TIMER ENDPOINTS
+/* ================= VALIDATE WORKSPACE (VS GURU JAWABAN) ================= */
+exports.validateWorkspace = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
+    if (!workspace) return res.status(400).json({ valid: false, message: "Belum ada workspace!" });
+
+    const room = await DiscussionRoom.findByPk(roomId);
+    const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
+    if (!officialAnswer) return res.status(400).json({ valid: false, message: "Guru belum upload jawaban!" });
+
+    const normalizeText = (text) => (text || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
+    
+    // PSEUDOCODE VALIDATION
+    const studentPseudo = normalizeText(workspace.pseudocode);
+    const officialPseudo = normalizeText(officialAnswer.pseudocode);
+    const pseudocodeMatch = studentPseudo === officialPseudo;
+
+    // FLOWCHART VALIDATION
+    const parseFlowchart = (flowData) => {
+      try {
+        return typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || { conditions: [], elseInstruction: '' };
+      } catch {
+        return { conditions: [], elseInstruction: '' };
+      }
+    };
+
+    const studentFlow = parseFlowchart(workspace.flowchart);
+    const officialFlow = parseFlowchart(officialAnswer.flowchart);
+    
+    let flowchartMatch = true;
+    let flowchartDetails = {
+      conditionsCountMatch: studentFlow.conditions.length === officialFlow.conditions.length,
+      conditions: [],
+      elseMatch: normalizeText(studentFlow.elseInstruction) === normalizeText(officialFlow.elseInstruction)
+    };
+
+    const studentConditions = Array.isArray(studentFlow.conditions) ? studentFlow.conditions : [];
+    const officialConditions = Array.isArray(officialFlow.conditions) ? officialFlow.conditions : [];
+
+    if (studentConditions.length !== officialConditions.length) {
+      flowchartMatch = false;
+    } else {
+      for (let i = 0; i < studentConditions.length; i++) {
+        const sCond = normalizeText(studentConditions[i]?.condition || '');
+        const oCond = normalizeText(officialConditions[i]?.condition || '');
+        const sYes = normalizeText(studentConditions[i]?.yes || '');
+        const oYes = normalizeText(officialConditions[i]?.yes || '');
+
+        const condMatch = {
+          index: i + 1,
+          conditionMatch: sCond === oCond,
+          yesMatch: sYes === oYes
+        };
+
+        flowchartDetails.conditions.push(condMatch);
+        if (!condMatch.conditionMatch || !condMatch.yesMatch) {
+          flowchartMatch = false;
+        }
+      }
+    }
+
+    const isValid = pseudocodeMatch && flowchartMatch;
+
+    res.json({
+      valid: isValid,
+      score: isValid ? 100 : Math.round((pseudocodeMatch ? 50 : 0) + (flowchartMatch ? 50 : 0)),
+      details: {
+        pseudocodeMatch,
+        flowchartMatch,
+        flowchartDetails,
+        pseudocode: {
+          student: workspace.pseudocode?.trim(),
+          official: officialAnswer.pseudocode?.trim(),
+          match: pseudocodeMatch
+        }
+      }
+    });
+  } catch (error) {
+    console.error("validateWorkspace error:", error);
+    res.status(500).json({ valid: false, message: "Server error" });
+  }
+};
+
+/* ================= TIMER SYSTEM ================= */
 exports.startRoomTimer = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const duration = 5400 * 1000; 
+    const duration = 3600 * 1000; // 60 minutes
     const timerEnd = new Date(Date.now() + duration);
     
     await DiscussionRoom.update(
@@ -1044,35 +837,54 @@ exports.startRoomTimer = async (req, res) => {
       status: true, 
       timerEnd: timerEnd.toISOString(), 
       duration: 3600,
-      message: "Timer started - 60 minutes" 
+      message: "Timer dimulai - 60 menit" 
     });
   } catch (error) {
-    res.status(500).json({ status: false, message: "Timer start failed" });
+    console.error("startRoomTimer error:", error);
+    res.status(500).json({ status: false, message: "Gagal start timer" });
   }
 };
 
-exports.checkTimerPenalty = async (req, res) => {
+exports.checkTimerStatus = async (req, res) => {
   try {
     const { roomId } = req.params;
     const room = await DiscussionRoom.findByPk(roomId);
     
-    if (!room.timerEnd) {
-      return res.json({ timeLeft: 5400, overtimeMinutes: 0, penaltyXP: 0 });
+    if (!room?.timerEnd) {
+      return res.json({ timeLeft: 3600, overtimeMinutes: 0, penaltyXP: 0, expired: false });
     }
     
     const now = Date.now();
-    const timeLeft = (new Date(room.timerEnd) - now) / 1000;
+    const timeLeft = Math.max(0, (new Date(room.timerEnd) - now) / 1000);
     const overtimeMs = Math.max(0, now - new Date(room.timerEnd).getTime());
     const overtimeMinutes = Math.floor(overtimeMs / 60000);
     const penaltyXP = Math.floor(overtimeMinutes / 5) * 10;
     
     res.json({
-      timeLeft: Math.max(0, timeLeft),
+      timeLeft: Math.floor(timeLeft),
       overtimeMinutes,
       penaltyXP,
       expired: timeLeft <= 0
     });
   } catch (error) {
-    res.status(500).json({ timeLeft: 0, penaltyXP: 0 });
+    console.error("checkTimerStatus error:", error);
+    res.status(500).json({ timeLeft: 0, penaltyXP: 0, expired: false });
   }
 };
+
+/* ================= GET WORKSPACE ATTEMPTS (ADMIN) ================= */
+exports.getWorkspaceAttempts = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const attempts = await WorkspaceAttempt.findAll({
+      where: { roomId },
+      order: [['createdAt', 'ASC']],
+    });
+    res.json({ status: true, data: attempts });
+  } catch (err) {
+    console.error("getWorkspaceAttempts:", err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+module.exports = exports;
