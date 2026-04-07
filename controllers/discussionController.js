@@ -38,44 +38,64 @@ exports.getRoomPerformance = async (req, res) => {
   try {
     const { roomId } = req.params;
 
+    // 🔥 CLUES
     const usedClues = await DiscussionClueLog.count({ where: { roomId } });
+
+    // 🔥 ATTEMPTS - TERpisah pseudocode & flowchart
     const pseudoAttempts = await WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" } });
     const flowchartAttempts = await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" } });
     const totalAttempts = pseudoAttempts + flowchartAttempts;
 
+    // 🔥 TASKS
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
     const allDone = tasks.length === 5 && tasks.every(t => t.done);
 
-    // ✅ FIXED: MULAI DARI 100%, TASK TIDAK LAGI -20%
+    // 🔥 SCORING - START 100%
     let score = 100;
-    score -= usedClues * 10; // Clue penalty
-    const attemptsAbove3 = Math.max(0, totalAttempts - 3);
-    score -= attemptsAbove3 * 5; // Attempt penalty
     
-    // ✅ TASK BONUS (+10% jika semua selesai)
+    // Penalty 1: Clue (-10% per clue, max 3)
+    score -= Math.min(usedClues * 10, 30);
+    
+    // Penalty 2: Attempts (-5% mulai attempt 6+)
+    const attemptsAbove5 = Math.max(0, totalAttempts - 5);
+    score -= attemptsAbove5 * 5;
+    
+    // Bonus: All tasks done (+10%)
     if (allDone) score += 10;
     
-    if (score > 100) score = 100;
-    if (score < 0) score = 0;
+    // Clamp 0-100
+    score = Math.max(0, Math.min(100, score));
 
-    console.log(`📊 Performance room ${roomId}:`, { usedClues, totalAttempts, allDone, score });
-
-    res.json({
-      score: Math.round(score),
+    console.log(`📊 Performance room ${roomId}:`, {
       usedClues,
       pseudoAttempts,
       flowchartAttempts,
       totalAttempts,
+      attemptsAbove5,
+      allDone,
+      score: Math.round(score)
+    });
+
+    res.json({
+      score: Math.round(score),
+      usedClues,
+      attempts: {
+        pseudocode: pseudoAttempts,
+        flowchart: flowchartAttempts,
+        total: totalAttempts,
+        extra: attemptsAbove5
+      },
       allDone,
       breakdown: {
-        cluePenalty: usedClues * 10,
-        attemptPenalty: attemptsAbove3 * 5,
+        base: 100,
+        cluePenalty: Math.min(usedClues * 10, 30),
+        attemptPenalty: attemptsAbove5 * 5,
         taskBonus: allDone ? 10 : 0
       }
     });
   } catch (error) {
     console.error("Error getRoomPerformance:", error);
-    res.status(500).json({ message: "Server error", score: 100 }); // ✅ DEFAULT 100%
+    res.status(500).json({ message: "Server error", score: 100 });
   }
 };
 
@@ -453,82 +473,152 @@ exports.getTaskProgress = async (req, res) => {
 };
 
 /* ================= SAVE PSEUDOCODE ================= */
+/* ================= SAVE PSEUDOCODE - UNLIMITED + XP PENALTY ================= */
 exports.savePseudocode = async (req, res) => {
+  const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
     const { pseudocode } = req.body;
+    const userId = req.user.id;
 
-    if (!pseudocode || !pseudocode.trim()) {
+    console.log(`💾 savePseudocode room ${roomId}`);
+
+    if (!pseudocode?.trim()) {
       return res.status(400).json({ status: false, message: "Pseudocode kosong" });
     }
 
+    // Hitung attempts
     const attemptCount = await WorkspaceAttempt.count({
       where: { roomId, type: "pseudocode" }
     });
 
-    if (attemptCount >= 10) {
-      return res.status(400).json({ message: "Max 10 attempt" });
-    }
-
+    // 🔥 NEW ATTEMPT
     await WorkspaceAttempt.create({
       roomId,
       type: "pseudocode",
       attemptNumber: attemptCount + 1,
       content: pseudocode,
+      userId  // Track siapa yang save
     });
 
-    // 🔥 UPSERT (ANTI DUPLIKAT)
+    // XP PENALTY - mulai attempt 6 (-10 XP per anggota)
+    if (attemptCount + 1 > 5) {
+      const penalty = 10;
+      const room = await DiscussionRoom.findByPk(roomId, { transaction });
+      const members = await UserMateriProgress.findAll({
+        where: { materiId: room.materiId, roomId },
+        transaction
+      });
+
+      for (const member of members) {
+        if (member.xp >= penalty) {
+          member.xp -= penalty;
+          await member.save({ transaction });
+          await User.update(
+            { xp: User.sequelize.literal(`xp - ${penalty}`) },
+            { where: { id: member.userId }, transaction }
+          );
+        }
+      }
+      
+      console.log(`⚠️ Pseudocode penalty: -${penalty}XP x${members.length} members (attempt ${attemptCount + 1})`);
+    }
+
+    // Save workspace
     await Workspace.upsert({
       roomId,
-      pseudocode,
+      pseudocode: pseudocode.trim()
+    }, { transaction });
+
+    await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true }, { transaction });
+
+    await transaction.commit();
+    
+    res.json({ 
+      status: true, 
+      attempt: attemptCount + 1,
+      penalty: attemptCount + 1 > 5 ? 10 : 0,
+      message: `Saved! Attempt ${attemptCount + 1}${attemptCount + 1 > 5 ? ' (-10XP)' : ''}`
     });
 
-    await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true });
-
-    res.json({ status: true });
-
   } catch (err) {
-    console.error("savePseudo:", err);
-    res.status(500).json({ status: false });
+    await transaction.rollback();
+    console.error("savePseudocode ERROR:", err);
+    res.status(500).json({ status: false, message: err.message });
   }
 };
 
-/* ================= SAVE FLOWCHART ================= */
+/* ================= SAVE FLOWCHART - UNLIMITED + XP PENALTY ================= */
 exports.saveFlowchart = async (req, res) => {
+  const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
     const { flowchart } = req.body;
+    const userId = req.user.id;
+
+    console.log(`💾 saveFlowchart room ${roomId}`);
+
+    if (!flowchart || !Array.isArray(flowchart.conditions) || flowchart.conditions.length === 0) {
+      return res.status(400).json({ status: false, message: "Flowchart kosong" });
+    }
 
     const attemptCount = await WorkspaceAttempt.count({
       where: { roomId, type: "flowchart" }
     });
 
-    if (attemptCount >= 10) {
-      return res.status(400).json({ message: "Max attempt flowchart" });
-    }
-
+    // 🔥 NEW ATTEMPT + PENALTY
     await WorkspaceAttempt.create({
       roomId,
       type: "flowchart",
       attemptNumber: attemptCount + 1,
       content: JSON.stringify(flowchart),
+      userId
     });
+
+    if (attemptCount + 1 > 5) {
+      const penalty = 10;
+      const room = await DiscussionRoom.findByPk(roomId, { transaction });
+      const members = await UserMateriProgress.findAll({
+        where: { materiId: room.materiId, roomId },
+        transaction
+      });
+
+      for (const member of members) {
+        if (member.xp >= penalty) {
+          member.xp -= penalty;
+          await member.save({ transaction });
+          await User.update(
+            { xp: User.sequelize.literal(`xp - ${penalty}`) },
+            { where: { id: member.userId }, transaction }
+          );
+        }
+      }
+      
+      console.log(`⚠️ Flowchart penalty: -${penalty}XP x${members.length} members (attempt ${attemptCount + 1})`);
+    }
 
     await Workspace.upsert({
       roomId,
-      flowchart,
+      flowchart
+    }, { transaction });
+
+    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
+
+    await transaction.commit();
+    
+    res.json({ 
+      status: true, 
+      attempt: attemptCount + 1,
+      penalty: attemptCount + 1 > 5 ? 10 : 0,
+      message: `Saved! Attempt ${attemptCount + 1}${attemptCount + 1 > 5 ? ' (-10XP)' : ''}`
     });
 
-    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true });
-
-    res.json({ status: true });
-
   } catch (err) {
-    console.error("saveFlow:", err);
-    res.status(500).json({ status: false });
+    await transaction.rollback();
+    console.error("saveFlowchart ERROR:", err);
+    res.status(500).json({ status: false, message: err.message });
   }
 };
-
 /* ================= GET WORKSPACE ================= */
 exports.getWorkspace = async (req, res) => {
   try {
