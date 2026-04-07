@@ -701,17 +701,49 @@ exports.validateWorkspace = async (req, res) => {
     const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
     if (!officialAnswer) return res.status(400).json({ valid: false, message: "Guru belum upload jawaban!" });
 
-    const normalizeText = (text) => (text || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
+    // 🔥 BETTER NORMALIZATION
+    const normalizeText = (text) => {
+      if (!text) return '';
+      return text
+        .toString()
+        .trim()
+        .toLowerCase()                    // Case insensitive
+        .replace(/\s+/g, ' ')             // Multiple spaces → single space
+        .replace(/[\r\n\t]+/g, ' ')       // Newlines/tabs → space
+        .replace(/\s*([:(),])\s*/g, '$1') // Clean around punctuation
+        .replace(/ +/g, ' ');              // Final cleanup
+    };
+
+    // 🔥 DEBUG: Raw vs Normalized
+    console.log('🔍 DEBUG VALIDATION:');
+    console.log('Student RAW:', JSON.stringify(workspace.pseudocode));
+    console.log('Official RAW:', JSON.stringify(officialAnswer.pseudocode));
     
-    // PSEUDOCODE VALIDATION
-    const studentPseudo = normalizeText(workspace.pseudocode);
-    const officialPseudo = normalizeText(officialAnswer.pseudocode);
+    const studentPseudoRaw = workspace.pseudocode;
+    const officialPseudoRaw = officialAnswer.pseudocode;
+    const studentPseudo = normalizeText(studentPseudoRaw);
+    const officialPseudo = normalizeText(officialPseudoRaw);
+    
+    console.log('Student NORM:', studentPseudo);
+    console.log('Official NORM:', officialPseudo);
+    console.log('Pseudo Match:', studentPseudo === officialPseudo);
+
     const pseudocodeMatch = studentPseudo === officialPseudo;
 
-    // FLOWCHART VALIDATION
+    // FLOWCHART VALIDATION - BETTER
     const parseFlowchart = (flowData) => {
       try {
-        return typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || { conditions: [], elseInstruction: '' };
+        const parsed = typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || { conditions: [], elseInstruction: '' };
+        // Normalize all text fields
+        if (parsed.conditions) {
+          parsed.conditions = parsed.conditions.map(cond => ({
+            condition: normalizeText(cond.condition || ''),
+            yes: normalizeText(cond.yes || ''),
+            no: normalizeText(cond.no || '')
+          }));
+        }
+        parsed.elseInstruction = normalizeText(parsed.elseInstruction || '');
+        return parsed;
       } catch {
         return { conditions: [], elseInstruction: '' };
       }
@@ -720,13 +752,18 @@ exports.validateWorkspace = async (req, res) => {
     const studentFlow = parseFlowchart(workspace.flowchart);
     const officialFlow = parseFlowchart(officialAnswer.flowchart);
     
+    console.log('Student Flow:', JSON.stringify(studentFlow, null, 2));
+    console.log('Official Flow:', JSON.stringify(officialFlow, null, 2));
+
     let flowchartMatch = true;
     let flowchartDetails = {
       conditionsCountMatch: studentFlow.conditions.length === officialFlow.conditions.length,
       conditions: [],
-      elseMatch: normalizeText(studentFlow.elseInstruction) === normalizeText(officialFlow.elseInstruction)
+      elseMatch: studentFlow.elseInstruction === officialFlow.elseInstruction,
+      showElseMatch: studentFlow.showElse === officialFlow.showElse
     };
 
+    // Compare conditions
     const studentConditions = Array.isArray(studentFlow.conditions) ? studentFlow.conditions : [];
     const officialConditions = Array.isArray(officialFlow.conditions) ? officialFlow.conditions : [];
 
@@ -734,15 +771,15 @@ exports.validateWorkspace = async (req, res) => {
       flowchartMatch = false;
     } else {
       for (let i = 0; i < studentConditions.length; i++) {
-        const sCond = normalizeText(studentConditions[i]?.condition || '');
-        const oCond = normalizeText(officialConditions[i]?.condition || '');
-        const sYes = normalizeText(studentConditions[i]?.yes || '');
-        const oYes = normalizeText(officialConditions[i]?.yes || '');
-
+        const sCond = studentConditions[i];
+        const oCond = officialConditions[i];
+        
         const condMatch = {
           index: i + 1,
-          conditionMatch: sCond === oCond,
-          yesMatch: sYes === oYes
+          conditionMatch: sCond.condition === oCond.condition,
+          yesMatch: sCond.yes === oCond.yes,
+          student: sCond,
+          official: oCond
         };
 
         flowchartDetails.conditions.push(condMatch);
@@ -760,17 +797,26 @@ exports.validateWorkspace = async (req, res) => {
       details: {
         pseudocodeMatch,
         flowchartMatch,
-        flowchartDetails,
-        pseudocode: {
-          student: workspace.pseudocode?.trim(),
-          official: officialAnswer.pseudocode?.trim(),
-          match: pseudocodeMatch
-        }
+        pseudocodeFeedback: !pseudocodeMatch ? 
+          `Perbedaan ditemukan. Student: "${studentPseudoRaw?.trim() || 'KOSONG'}" vs Official: "${officialPseudoRaw?.trim() || 'KOSONG'}"` : 
+          "✅ Benar!",
+        flowchartFeedback: !flowchartMatch ? 
+          `Conditions: ${studentConditions.length} vs ${officialConditions.length}. ELSE: "${studentFlow.elseInstruction}" vs "${officialFlow.elseInstruction}"` :
+          "✅ Benar!",
+        debug: {
+          studentPseudoRaw: studentPseudoRaw?.trim(),
+          officialPseudoRaw: officialPseudoRaw?.trim(),
+          studentPseudoNorm: studentPseudo,
+          officialPseudoNorm: officialPseudo,
+          studentFlow,
+          officialFlow
+        },
+        flowchartDetails
       }
     });
   } catch (error) {
     console.error("validateWorkspace error:", error);
-    res.status(500).json({ valid: false, message: "Server error" });
+    res.status(500).json({ valid: false, message: "Server error", error: error.message });
   }
 };
 
