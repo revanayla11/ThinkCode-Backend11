@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const verifyToken = require("../../middleware/verifyToken");
 const isAdmin = require("../../middleware/isAdmin");
-const ctrl = require("../../controllers/miniGameAdminController");
+const ctrl = require("../../controllers/admin/miniGameAdminController");
 
 router.get("/materi/:materiId/game-levels", verifyToken, isAdmin, ctrl.getMateriGameLevels);
 router.get("/game/level/:levelId/questions", verifyToken, isAdmin, ctrl.getLevelQuestions);
