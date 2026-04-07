@@ -1,5 +1,14 @@
+'use strict';
+const { Model } = require('sequelize');
+
 module.exports = (sequelize, DataTypes) => {
-  const UserStreak = sequelize.define("UserStreak", {
+  class UserStreak extends Model {
+    static associate(models) {
+      UserStreak.belongsTo(models.User, { foreignKey: 'userId' });
+    }
+  }
+
+  UserStreak.init({
     id: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -9,31 +18,26 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "Users",
-        key: "id"
-      },
-      onUpdate: "CASCADE",
-      onDelete: "CASCADE"
-    },
-    streakCount: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0,
-      validate: {
-        min: 0
+        model: 'Users',
+        key: 'id'
       }
     },
-    lastCompleted: {
-      type: DataTypes.DATE,
-      allowNull: true
+    date: {
+      type: DataTypes.DATEONLY,
+      primaryKey: true,
+      allowNull: false
+    },
+    streak: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1
     }
   }, {
-    tableName: "UserStreaks",
+    sequelize,
+    modelName: 'UserStreak',
+    tableName: 'UserStreaks',
     timestamps: true
   });
-
-  UserStreak.associate = (models) => {
-    UserStreak.belongsTo(models.User, { foreignKey: "userId" });
-  };
 
   return UserStreak;
 };
