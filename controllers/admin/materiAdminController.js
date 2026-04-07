@@ -165,14 +165,26 @@ exports.deleteOrientasi = async (req, res) => {
 };
 
 // === SECTION IMAGE UPLOAD ===
+// 🔥 FIXED: Upload Section Image (ganti yang lama)
 exports.uploadSectionImage = async (req, res) => {
+  console.log("=== SECTION IMAGE UPLOAD ===");
+  console.log("req.file:", req.file);
+  
   if (!req.file) {
     return res.status(400).json({ error: "No image file uploaded" });
   }
 
   try {
     const baseUrl = 'https://thinkcode-backend11-production.up.railway.app';
-    const url = `${baseUrl}/uploads/orientasi/${req.file.filename}`;
+    const url = `${baseUrl}/uploads/sections/${req.file.filename}`;
+    
+    // Buat folder sections jika belum ada
+    const uploadDir = path.join(__dirname, '../../uploads/sections');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    console.log("✅ Generated URL:", url);
     res.json({ url });
   } catch (err) {
     console.error('Upload Section Image Error:', err);
