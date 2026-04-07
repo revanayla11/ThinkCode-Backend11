@@ -695,6 +695,7 @@ END`,
 };
 
 /* ================= VALIDATE WORKSPACE (VS GURU JAWABAN) ================= */
+/* ================= VALIDATE WORKSPACE (LOOSER & FAIRER) ================= */
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -705,35 +706,29 @@ exports.validateWorkspace = async (req, res) => {
     const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
     if (!officialAnswer) return res.json({ valid: false, score: 0, message: "Guru belum upload jawaban!" });
 
-    // 🔥 SMART NORMALIZATION (FLEXIBLE)
+    // 🔥 NORMALIZATION (SAMA)
     const normalizeText = (text) => {
       if (!text) return '';
       return text
         .toString()
         .trim()
         .toLowerCase()
-        .replace(/[""]/g, '')        // Ignore quotes
-        .replace(/[,()]/g, '')       // Ignore punctuation
-        .replace(/\s+/g, ' ')        // Single space
-        .replace(/ +/g, ' ')
-        .replace(/^deklrasi\s+deklrasi?/i, 'deklrasi')  // Ignore duplicates
+        .replace(/[""]/g, '')
+        .replace(/[,()]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/^deklrasi\s+deklrasi?/i, 'deklrasi')
         .replace(/^algoritma\s+algoritma?/i, 'algoritma')
         .replace(/^end\s+end/i, 'end');
     };
 
-    // 🔥 FUZZY MATCHING (80% similarity = OK)
     const similarityScore = (str1, str2) => {
       if (!str1 || !str2) return 0;
       const longer = str1.length > str2.length ? str1 : str2;
       const shorter = str1.length > str2.length ? str2 : str1;
       const matrix = [];
       
-      for (let i = 0; i <= longer.length; i++) {
-        matrix[i] = [i];
-      }
-      for (let j = 0; j <= shorter.length; j++) {
-        matrix[0][j] = j;
-      }
+      for (let i = 0; i <= longer.length; i++) matrix[i] = [i];
+      for (let j = 0; j <= shorter.length; j++) matrix[0][j] = j;
       
       for (let i = 1; i <= longer.length; i++) {
         for (let j = 1; j <= shorter.length; j++) {
@@ -752,14 +747,13 @@ exports.validateWorkspace = async (req, res) => {
       return ((longer.length - matrix[longer.length][shorter.length]) / longer.length) * 100;
     };
 
-    // PSEUDOCODE - FLEXIBLE MATCHING
+    // PSEUDOCODE (SAMA - UDAH BAGUS)
     const studentPseudo = normalizeText(workspace.pseudocode);
     const officialPseudo = normalizeText(officialAnswer.pseudocode);
-    
     const pseudoSimilarity = similarityScore(studentPseudo, officialPseudo);
-    const pseudocodeMatch = pseudoSimilarity >= 85; // 85% = OK
+    const pseudocodeMatch = pseudoSimilarity >= 80; // ✅ LOOSER: 80%
 
-    // FLOWCHART - STRUCTURE + CONTENT MATCHING
+    // 🔥 FLOWCHART - SUPER FLEXIBLE ✅
     const parseFlowchart = (flowData) => {
       try {
         const parsed = typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || {};
@@ -769,7 +763,7 @@ exports.validateWorkspace = async (req, res) => {
           conditions: conditions.map(c => ({
             condition: normalizeText(c.condition || ''),
             yes: normalizeText(c.yes || ''),
-            no: normalizeText(c.no || '')
+            no: normalizeText(c.no || '') // ✅ IGNORE NO BRANCH
           })),
           elseInstruction: normalizeText(parsed.elseInstruction || ''),
           showElse: !!parsed.showElse
@@ -782,61 +776,99 @@ exports.validateWorkspace = async (req, res) => {
     const studentFlow = parseFlowchart(workspace.flowchart);
     const officialFlow = parseFlowchart(officialAnswer.flowchart);
 
-    // Flowchart scoring
+    console.log("🔍 DEBUG FLOWCHART:", {
+      student: studentFlow,
+      official: officialFlow
+    });
+
+    // 🔥 FLOWCHART SCORING - LOOSE & FLEXIBLE
     let flowchartScore = 0;
     let flowchartDetails = {
       conditionsCount: studentFlow.conditions.length,
       officialConditionsCount: officialFlow.conditions.length,
       conditionsMatch: [],
-      elseMatch: false
+      elseMatch: false,
+      bestMatches: []
     };
 
-    // Conditions matching (flexible order)
-    const maxConditions = Math.max(studentFlow.conditions.length, officialFlow.conditions.length);
-    for (let i = 0; i < maxConditions; i++) {
-      const sCond = studentFlow.conditions[i] || {};
-      const oCond = officialFlow.conditions[i] || {};
-      
-      const condSim = similarityScore(sCond.condition, oCond.condition);
-      const yesSim = similarityScore(sCond.yes, oCond.yes);
-      
-      flowchartDetails.conditionsMatch.push({
-        index: i + 1,
-        conditionSim: Math.round(condSim),
-        yesSim: Math.round(yesSim)
-      });
-      
-      flowchartScore += (condSim + yesSim) / 2;
-    }
+    // ✅ SMART MATCHING - BEST PAIRING (bukan fixed order)
+    const findBestMatches = () => {
+      let matches = [];
+      for (let s = 0; s < studentFlow.conditions.length; s++) {
+        let bestScore = 0;
+        let bestIndex = -1;
+        for (let o = 0; o < officialFlow.conditions.length; o++) {
+          const condSim = similarityScore(studentFlow.conditions[s].condition, officialFlow.conditions[o].condition);
+          const yesSim = similarityScore(studentFlow.conditions[s].yes, officialFlow.conditions[o].yes);
+          const totalSim = (condSim + yesSim) / 2;
+          
+          if (totalSim > bestScore) {
+            bestScore = totalSim;
+            bestIndex = o;
+          }
+        }
+        matches.push({ studentIndex: s, officialIndex: bestIndex, score: bestScore });
+      }
+      return matches;
+    };
 
-    // ELSE matching
+    const bestMatches = findBestMatches();
+    flowchartDetails.bestMatches = bestMatches.map(m => ({
+      student: m.studentIndex + 1,
+      official: m.officialIndex + 1,
+      score: Math.round(m.score)
+    }));
+
+    // Hitung score dari best matches
+    bestMatches.forEach(match => {
+      flowchartScore += match.score;
+    });
+
+    // Normalize conditions score
+    const avgCondScore = studentFlow.conditions.length > 0 
+      ? flowchartScore / studentFlow.conditions.length 
+      : 0;
+
+    // 🔥 ELSE - OPTIONAL & LOOSE
     const elseSim = similarityScore(studentFlow.elseInstruction, officialFlow.elseInstruction);
-    flowchartDetails.elseMatch = elseSim >= 80;
-    flowchartScore += elseSim;
+    const hasElseMatch = elseSim >= 60 || (!studentFlow.showElse && !officialFlow.showElse); // ✅ NO ELSE = OK
+    flowchartDetails.elseMatch = hasElseMatch;
+    
+    if (hasElseMatch) flowchartScore += 30; // Bonus ELSE
 
-    flowchartScore = Math.round(flowchartScore / (maxConditions * 2 + 1) * 100);
-    const flowchartMatch = flowchartScore >= 80;
+    // FINAL NORMALIZATION
+    const totalWeight = studentFlow.conditions.length + (hasElseMatch ? 1 : 0);
+    flowchartScore = totalWeight > 0 ? Math.round(flowchartScore / totalWeight) : 0;
+    
+    // ✅ LOOSER THRESHOLD
+    const flowchartMatch = flowchartScore >= 70; // 🎉 70% = OK!
+    const pseudocodeMatchFinal = pseudoSimilarity >= 80;
 
-    // FINAL SCORE
+    // FINAL SCORE (50/50)
     const totalScore = Math.round((pseudoSimilarity * 0.5) + (flowchartScore * 0.5));
-    const isValid = totalScore >= 90;
+    const isValid = totalScore >= 85; // 🎉 LOOSER: 85%
 
-    console.log(`📊 VALIDATION ${roomId}: Pseudo=${Math.round(pseudoSimilarity)}%, Flow=${flowchartScore}%, Total=${totalScore}%`);
+    console.log(`📊 VALIDATION ${roomId}:`, {
+      pseudoSimilarity: Math.round(pseudoSimilarity),
+      flowchartScore: Math.round(flowchartScore),
+      totalScore,
+      isValid,
+      flowchartDetails
+    });
 
     res.json({
       valid: isValid,
       score: totalScore,
       details: {
-        pseudocodeMatch,
+        pseudocodeMatch: pseudocodeMatchFinal,
         pseudocodeSimilarity: Math.round(pseudoSimilarity),
         flowchartMatch,
         flowchartScore: Math.round(flowchartScore),
         flowchartDetails,
         debug: {
-          studentPseudo,
-          officialPseudo,
-          studentFlow,
-          officialFlow
+          studentFlow: studentFlow,
+          officialFlow: officialFlow,
+          bestMatches: flowchartDetails.bestMatches
         }
       }
     });
