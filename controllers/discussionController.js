@@ -637,10 +637,10 @@ ALGORITMA
 END`;
 
     const blanks = [
-      { hint: "Nama variabel (contoh: angka)", expected: "angka" },
-      { hint: "Variabel input (contoh: angka)", expected: "angka" },
-      { hint: "Kondisi (contoh: angka > 0)", expected: "angka > 0" },
-      { hint: "Pesan output (contoh: Angka positif)", expected: "Angka positif" }
+      { hint: "Nama variabel", expected: "angka" },
+      { hint: "Variabel input", expected: "angka" },
+      { hint: "Kondisi", expected: "angka > 0" },
+      { hint: "Pesan output", expected: "Angka positif" }
     ];
 
     res.json({
