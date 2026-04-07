@@ -625,11 +625,8 @@ exports.getPseudocodeTemplate = async (req, res) => {
   try {
     const { roomId } = req.params;
     const room = await DiscussionRoom.findByPk(roomId);
-    if (!room) return res.status(404).json({ status: false, message: "Room not found" });
-
-    const materiId = room.materiId.toString();
     
-    // ✅ NEW TEMPLATE SESUAI REQUEST
+    // 🔥 CORRECT TEMPLATE SESUAI GURU
     const template = `DEKLARASI 
     ___BLANK_0___ : integer
 
@@ -637,7 +634,7 @@ ALGORITMA
     read(___BLANK_1___)
     
     IF (___BLANK_2___) THEN 
-        write("___BLANK_3___")
+        write("___BLANK_3___", ___BLANK_4___)
     ENDIF 
 
 END`;
@@ -646,7 +643,8 @@ END`;
       { hint: "Nama variabel", expected: "angka" },
       { hint: "Variabel input", expected: "angka" },
       { hint: "Kondisi", expected: "angka > 0" },
-      { hint: "Pesan output", expected: "Angka positif" }
+      { hint: "Pesan awal", expected: "Angka " },
+      { hint: "Variabel output", expected: "angka" }
     ];
 
     res.json({
@@ -654,36 +652,42 @@ END`;
       data: {
         template,
         blanks,
-        expectedFull: template
-          .replace('___BLANK_0___', 'angka')
-          .replace('___BLANK_1___', 'angka')
-          .replace('___BLANK_2___', 'angka > 0')
-          .replace('___BLANK_3___', 'Angka positif'),
-        materiType: "if-simple-blanks",
-        totalBlanks: 4,
-        instruction: "Isi 4 blank untuk melengkapi algoritma IF sederhana!"
+        expectedFull: `DEKLARASI 
+    angka : integer
+
+ALGORITMA 
+    read(angka)
+    
+    IF (angka > 0) THEN 
+        write("Angka ", angka, " adalah Positif")
+    ENDIF 
+
+END`,
+        totalBlanks: 5
       }
     });
   } catch (error) {
-    console.error("getPseudocodeTemplate error:", error);
+    // Fallback juga update
     res.status(500).json({ 
-      status: false, 
-      message: "Gagal load template",
-      data: { 
+      status: false,
+      data: {
         template: `DEKLARASI 
     ___BLANK_0___ : integer
 
 ALGORITMA 
     read(___BLANK_1___)
+    
     IF (___BLANK_2___) THEN 
-        write("___BLANK_3___")
+        write("___BLANK_3___", ___BLANK_4___)
     ENDIF 
+
 END`,
         blanks: [
           { hint: "Nama variabel" },
           { hint: "Variabel input" },
           { hint: "Kondisi" },
-          { hint: "Pesan output" }
+          { hint: "Pesan awal" },
+          { hint: "Variabel output" }
         ]
       }
     });
@@ -695,128 +699,210 @@ exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
     const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
-    if (!workspace) return res.status(400).json({ valid: false, message: "Belum ada workspace!" });
+    if (!workspace) return res.json({ valid: false, score: 0, message: "Belum ada workspace!" });
 
     const room = await DiscussionRoom.findByPk(roomId);
     const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
-    if (!officialAnswer) return res.status(400).json({ valid: false, message: "Guru belum upload jawaban!" });
+    if (!officialAnswer) return res.json({ valid: false, score: 0, message: "Guru belum upload jawaban!" });
 
-    // 🔥 BETTER NORMALIZATION
+    // 🔥 SMART NORMALIZATION (FLEXIBLE)
     const normalizeText = (text) => {
       if (!text) return '';
       return text
         .toString()
         .trim()
-        .toLowerCase()                    // Case insensitive
-        .replace(/\s+/g, ' ')             // Multiple spaces → single space
-        .replace(/[\r\n\t]+/g, ' ')       // Newlines/tabs → space
-        .replace(/\s*([:(),])\s*/g, '$1') // Clean around punctuation
-        .replace(/ +/g, ' ');              // Final cleanup
+        .toLowerCase()
+        .replace(/[""]/g, '')        // Ignore quotes
+        .replace(/[,()]/g, '')       // Ignore punctuation
+        .replace(/\s+/g, ' ')        // Single space
+        .replace(/ +/g, ' ')
+        .replace(/^deklrasi\s+deklrasi?/i, 'deklrasi')  // Ignore duplicates
+        .replace(/^algoritma\s+algoritma?/i, 'algoritma')
+        .replace(/^end\s+end/i, 'end');
     };
 
-    // 🔥 DEBUG: Raw vs Normalized
-    console.log('🔍 DEBUG VALIDATION:');
-    console.log('Student RAW:', JSON.stringify(workspace.pseudocode));
-    console.log('Official RAW:', JSON.stringify(officialAnswer.pseudocode));
-    
-    const studentPseudoRaw = workspace.pseudocode;
-    const officialPseudoRaw = officialAnswer.pseudocode;
-    const studentPseudo = normalizeText(studentPseudoRaw);
-    const officialPseudo = normalizeText(officialPseudoRaw);
-    
-    console.log('Student NORM:', studentPseudo);
-    console.log('Official NORM:', officialPseudo);
-    console.log('Pseudo Match:', studentPseudo === officialPseudo);
+    // 🔥 FUZZY MATCHING (80% similarity = OK)
+    const similarityScore = (str1, str2) => {
+      if (!str1 || !str2) return 0;
+      const longer = str1.length > str2.length ? str1 : str2;
+      const shorter = str1.length > str2.length ? str2 : str1;
+      const matrix = [];
+      
+      for (let i = 0; i <= longer.length; i++) {
+        matrix[i] = [i];
+      }
+      for (let j = 0; j <= shorter.length; j++) {
+        matrix[0][j] = j;
+      }
+      
+      for (let i = 1; i <= longer.length; i++) {
+        for (let j = 1; j <= shorter.length; j++) {
+          if (longer.charAt(i - 1) === shorter.charAt(j - 1)) {
+            matrix[i][j] = matrix[i - 1][j - 1];
+          } else {
+            matrix[i][j] = Math.min(
+              matrix[i - 1][j - 1] + 1,
+              matrix[i][j - 1] + 1,
+              matrix[i - 1][j] + 1
+            );
+          }
+        }
+      }
+      
+      return ((longer.length - matrix[longer.length][shorter.length]) / longer.length) * 100;
+    };
 
-    const pseudocodeMatch = studentPseudo === officialPseudo;
+    // PSEUDOCODE - FLEXIBLE MATCHING
+    const studentPseudo = normalizeText(workspace.pseudocode);
+    const officialPseudo = normalizeText(officialAnswer.pseudocode);
+    
+    const pseudoSimilarity = similarityScore(studentPseudo, officialPseudo);
+    const pseudocodeMatch = pseudoSimilarity >= 85; // 85% = OK
 
-    // FLOWCHART VALIDATION - BETTER
+    // FLOWCHART - STRUCTURE + CONTENT MATCHING
     const parseFlowchart = (flowData) => {
       try {
-        const parsed = typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || { conditions: [], elseInstruction: '' };
-        // Normalize all text fields
-        if (parsed.conditions) {
-          parsed.conditions = parsed.conditions.map(cond => ({
-            condition: normalizeText(cond.condition || ''),
-            yes: normalizeText(cond.yes || ''),
-            no: normalizeText(cond.no || '')
-          }));
-        }
-        parsed.elseInstruction = normalizeText(parsed.elseInstruction || '');
-        return parsed;
+        const parsed = typeof flowData === 'string' ? JSON.parse(flowData || '{}') : flowData || {};
+        const conditions = Array.isArray(parsed.conditions) ? parsed.conditions : [];
+        
+        return {
+          conditions: conditions.map(c => ({
+            condition: normalizeText(c.condition || ''),
+            yes: normalizeText(c.yes || ''),
+            no: normalizeText(c.no || '')
+          })),
+          elseInstruction: normalizeText(parsed.elseInstruction || ''),
+          showElse: !!parsed.showElse
+        };
       } catch {
-        return { conditions: [], elseInstruction: '' };
+        return { conditions: [], elseInstruction: '', showElse: false };
       }
     };
 
     const studentFlow = parseFlowchart(workspace.flowchart);
     const officialFlow = parseFlowchart(officialAnswer.flowchart);
-    
-    console.log('Student Flow:', JSON.stringify(studentFlow, null, 2));
-    console.log('Official Flow:', JSON.stringify(officialFlow, null, 2));
 
-    let flowchartMatch = true;
+    // Flowchart scoring
+    let flowchartScore = 0;
     let flowchartDetails = {
-      conditionsCountMatch: studentFlow.conditions.length === officialFlow.conditions.length,
-      conditions: [],
-      elseMatch: studentFlow.elseInstruction === officialFlow.elseInstruction,
-      showElseMatch: studentFlow.showElse === officialFlow.showElse
+      conditionsCount: studentFlow.conditions.length,
+      officialConditionsCount: officialFlow.conditions.length,
+      conditionsMatch: [],
+      elseMatch: false
     };
 
-    // Compare conditions
-    const studentConditions = Array.isArray(studentFlow.conditions) ? studentFlow.conditions : [];
-    const officialConditions = Array.isArray(officialFlow.conditions) ? officialFlow.conditions : [];
-
-    if (studentConditions.length !== officialConditions.length) {
-      flowchartMatch = false;
-    } else {
-      for (let i = 0; i < studentConditions.length; i++) {
-        const sCond = studentConditions[i];
-        const oCond = officialConditions[i];
-        
-        const condMatch = {
-          index: i + 1,
-          conditionMatch: sCond.condition === oCond.condition,
-          yesMatch: sCond.yes === oCond.yes,
-          student: sCond,
-          official: oCond
-        };
-
-        flowchartDetails.conditions.push(condMatch);
-        if (!condMatch.conditionMatch || !condMatch.yesMatch) {
-          flowchartMatch = false;
-        }
-      }
+    // Conditions matching (flexible order)
+    const maxConditions = Math.max(studentFlow.conditions.length, officialFlow.conditions.length);
+    for (let i = 0; i < maxConditions; i++) {
+      const sCond = studentFlow.conditions[i] || {};
+      const oCond = officialFlow.conditions[i] || {};
+      
+      const condSim = similarityScore(sCond.condition, oCond.condition);
+      const yesSim = similarityScore(sCond.yes, oCond.yes);
+      
+      flowchartDetails.conditionsMatch.push({
+        index: i + 1,
+        conditionSim: Math.round(condSim),
+        yesSim: Math.round(yesSim)
+      });
+      
+      flowchartScore += (condSim + yesSim) / 2;
     }
 
-    const isValid = pseudocodeMatch && flowchartMatch;
+    // ELSE matching
+    const elseSim = similarityScore(studentFlow.elseInstruction, officialFlow.elseInstruction);
+    flowchartDetails.elseMatch = elseSim >= 80;
+    flowchartScore += elseSim;
+
+    flowchartScore = Math.round(flowchartScore / (maxConditions * 2 + 1) * 100);
+    const flowchartMatch = flowchartScore >= 80;
+
+    // FINAL SCORE
+    const totalScore = Math.round((pseudoSimilarity * 0.5) + (flowchartScore * 0.5));
+    const isValid = totalScore >= 90;
+
+    console.log(`📊 VALIDATION ${roomId}: Pseudo=${Math.round(pseudoSimilarity)}%, Flow=${flowchartScore}%, Total=${totalScore}%`);
 
     res.json({
       valid: isValid,
-      score: isValid ? 100 : Math.round((pseudocodeMatch ? 50 : 0) + (flowchartMatch ? 50 : 0)),
+      score: totalScore,
       details: {
         pseudocodeMatch,
+        pseudocodeSimilarity: Math.round(pseudoSimilarity),
         flowchartMatch,
-        pseudocodeFeedback: !pseudocodeMatch ? 
-          `Perbedaan ditemukan. Student: "${studentPseudoRaw?.trim() || 'KOSONG'}" vs Official: "${officialPseudoRaw?.trim() || 'KOSONG'}"` : 
-          "✅ Benar!",
-        flowchartFeedback: !flowchartMatch ? 
-          `Conditions: ${studentConditions.length} vs ${officialConditions.length}. ELSE: "${studentFlow.elseInstruction}" vs "${officialFlow.elseInstruction}"` :
-          "✅ Benar!",
+        flowchartScore: Math.round(flowchartScore),
+        flowchartDetails,
         debug: {
-          studentPseudoRaw: studentPseudoRaw?.trim(),
-          officialPseudoRaw: officialPseudoRaw?.trim(),
-          studentPseudoNorm: studentPseudo,
-          officialPseudoNorm: officialPseudo,
+          studentPseudo,
+          officialPseudo,
           studentFlow,
           officialFlow
-        },
-        flowchartDetails
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("validateWorkspace error:", error);
+    res.status(500).json({ valid: false, score: 0, message: "Server error" });
+  }
+};
+
+// Buat endpoint baru untuk template dinamis
+exports.getDynamicTemplate = async (req, res) => {
+  try {
+    const { materiId } = req.params;
+    const officialAnswer = await MateriAnswer.findOne({ where: { materiId } });
+    
+    if (!officialAnswer?.pseudocode) {
+      return res.status(404).json({ message: "Template belum tersedia" });
+    }
+
+    // 🔥 EXTRACT BLANKS dari jawaban guru secara otomatis
+    const officialPseudo = officialAnswer.pseudocode;
+    const lines = officialPseudo.split('\n');
+    
+    // Simple blank extraction logic
+    const template = officialPseudo
+      .replace(/angka/g, '___BLANK_0___')  // Variabel utama
+      .replace(/>\s*0/g, '___BLANK_1___') // Kondisi
+      .replace(/write\s*\$/g, 'write(');   // Keep write structure
+
+    const blanks = [
+      { hint: "Nama variabel utama", example: "angka" },
+      { hint: "Kondisi IF", example: "angka > 0" },
+      { hint: "Aksi YES", example: "write(...)" }
+    ];
+
+    res.json({
+      status: true,
+      data: {
+        template,
+        blanks,
+        officialAnswer: officialAnswer.pseudocode,
+        officialFlowchart: officialAnswer.flowchart
       }
     });
   } catch (error) {
-    console.error("validateWorkspace error:", error);
-    res.status(500).json({ valid: false, message: "Server error", error: error.message });
+    // Fallback universal
+    res.json({
+      status: true,
+      data: {
+        template: `DEKLARASI 
+___BLANK_0___ : integer
+
+ALGORITMA 
+read(___BLANK_0___)
+IF (___BLANK_1___) THEN 
+write("___BLANK_2___")
+ENDIF 
+END`,
+        blanks: [
+          { hint: "Semua variabel", example: "angka" },
+          { hint: "Kondisi", example: "angka > 0" },
+          { hint: "Output", example: "Angka positif" }
+        ]
+      }
+    });
   }
 };
 
