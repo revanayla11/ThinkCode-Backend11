@@ -394,24 +394,30 @@ exports.getUserXp = async (req, res) => {
 /* ================= NEW: GET WORKSPACE DATA (COMPLETE) ================= */
 exports.getWorkspaceData = async (req, res) => {
   try {
-    const { roomId } = req.params;
-    const workspace = await Workspace.findOne({ where: { roomId } });
+    const roomId = parseInt(req.params.roomId);
+
+    const workspace = await Workspace.findOne({
+      where: { roomId }
+    });
+
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
-    
+
     const taskMap = {};
     tasks.forEach(t => { taskMap[t.taskId] = t.done; });
+
     for (let i = 1; i <= 5; i++) {
       if (!taskMap[i]) taskMap[i] = false;
     }
-    
-    res.json({ 
-      status: true, 
-      data: { 
+
+    res.json({
+      status: true,
+      data: {
         pseudocode: workspace?.pseudocode || "",
         flowchart: workspace?.flowchart || { conditions: [], elseInstruction: "" },
-        tasks: taskMap 
-      } 
+        tasks: taskMap
+      }
     });
+
   } catch (err) {
     console.error("getWorkspaceData:", err);
     res.status(500).json({ status: false, message: "Server error" });
@@ -438,16 +444,19 @@ exports.getTaskProgress = async (req, res) => {
 /* ================= SAVE PSEUDOCODE ================= */
 exports.savePseudocode = async (req, res) => {
   try {
-    const { roomId } = req.params;
+    const roomId = parseInt(req.params.roomId);
     const { pseudocode } = req.body;
 
     if (!pseudocode || !pseudocode.trim()) {
-      return res.status(400).json({ status: false, message: "Pseudocode tidak boleh kosong" });
+      return res.status(400).json({ status: false, message: "Pseudocode kosong" });
     }
 
-    const attemptCount = await WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" } });
+    const attemptCount = await WorkspaceAttempt.count({
+      where: { roomId, type: "pseudocode" }
+    });
+
     if (attemptCount >= 10) {
-      return res.status(400).json({ status: false, message: "Maksimal 10 attempt tercapai" });
+      return res.status(400).json({ message: "Max 10 attempt" });
     }
 
     await WorkspaceAttempt.create({
@@ -457,35 +466,34 @@ exports.savePseudocode = async (req, res) => {
       content: pseudocode,
     });
 
-    let workspace = await Workspace.findOne({ where: { roomId } });
-    if (workspace) {
-      await workspace.update({ pseudocode });
-    } else {
-      await Workspace.create({
-        roomId,
-        pseudocode,
-        flowchart: { conditions: [], elseInstruction: "" },
-      });
-    }
+    // 🔥 UPSERT (ANTI DUPLIKAT)
+    await Workspace.upsert({
+      roomId,
+      pseudocode,
+    });
 
     await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true });
 
-    res.json({ status: true, message: `Pseudocode disimpan (Attempt ${attemptCount + 1}/10)` });
+    res.json({ status: true });
+
   } catch (err) {
-    console.error("savePseudocode:", err);
-    res.status(500).json({ status: false, message: "Server error" });
+    console.error("savePseudo:", err);
+    res.status(500).json({ status: false });
   }
 };
 
 /* ================= SAVE FLOWCHART ================= */
 exports.saveFlowchart = async (req, res) => {
   try {
-    const { roomId } = req.params;
+    const roomId = parseInt(req.params.roomId);
     const { flowchart } = req.body;
 
-    const attemptCount = await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" } });
+    const attemptCount = await WorkspaceAttempt.count({
+      where: { roomId, type: "flowchart" }
+    });
+
     if (attemptCount >= 10) {
-      return res.status(400).json({ status: false, message: "Maksimal 10 attempt flowchart tercapai" });
+      return res.status(400).json({ message: "Max attempt flowchart" });
     }
 
     await WorkspaceAttempt.create({
@@ -495,26 +503,18 @@ exports.saveFlowchart = async (req, res) => {
       content: JSON.stringify(flowchart),
     });
 
-    let workspace = await Workspace.findOne({ where: { roomId } });
-    if (workspace) {
-      await workspace.update({ flowchart: flowchart });
-    } else {
-      await Workspace.create({
-        roomId,
-        pseudocode: "",
-        flowchart,
-      });
-    }
+    await Workspace.upsert({
+      roomId,
+      flowchart,
+    });
 
     await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true });
 
-    res.json({
-      status: true,
-      message: `Flowchart disimpan (Attempt ${attemptCount + 1}/10)`,
-    });
+    res.json({ status: true });
+
   } catch (err) {
-    console.error("saveFlowchart:", err);
-    res.status(500).json({ status: false, message: "Server error" });
+    console.error("saveFlow:", err);
+    res.status(500).json({ status: false });
   }
 };
 

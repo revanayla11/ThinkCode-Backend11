@@ -10,6 +10,7 @@ const Workspace = sequelize.define('Workspace', {
   roomId: {
     type: DataTypes.INTEGER,
     allowNull: false,
+    unique: true,
     references: {
       model: 'discussion_rooms',
       key: 'id',
