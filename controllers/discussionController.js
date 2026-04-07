@@ -46,11 +46,16 @@ exports.getRoomPerformance = async (req, res) => {
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
     const allDone = tasks.length === 5 && tasks.every(t => t.done);
 
+    // ✅ FIXED: MULAI DARI 100%, TASK TIDAK LAGI -20%
     let score = 100;
-    score -= usedClues * 10;
+    score -= usedClues * 10; // Clue penalty
     const attemptsAbove3 = Math.max(0, totalAttempts - 3);
-    score -= attemptsAbove3 * 5;
-    if (!allDone) score -= 20;
+    score -= attemptsAbove3 * 5; // Attempt penalty
+    
+    // ✅ TASK BONUS (+10% jika semua selesai)
+    if (allDone) score += 10;
+    
+    if (score > 100) score = 100;
     if (score < 0) score = 0;
 
     console.log(`📊 Performance room ${roomId}:`, { usedClues, totalAttempts, allDone, score });
@@ -65,12 +70,12 @@ exports.getRoomPerformance = async (req, res) => {
       breakdown: {
         cluePenalty: usedClues * 10,
         attemptPenalty: attemptsAbove3 * 5,
-        taskPenalty: allDone ? 0 : 20
+        taskBonus: allDone ? 10 : 0
       }
     });
   } catch (error) {
     console.error("Error getRoomPerformance:", error);
-    res.status(500).json({ message: "Server error", score: 0 });
+    res.status(500).json({ message: "Server error", score: 100 }); // ✅ DEFAULT 100%
   }
 };
 
@@ -609,6 +614,7 @@ exports.uploadJawaban = async (req, res) => {
 };
 
 /* ================= PSEUDOCODE TEMPLATE (DYNAMIC BY MATERI) ================= */
+// ✅ UPDATE getPseudocodeTemplate
 exports.getPseudocodeTemplate = async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -616,111 +622,40 @@ exports.getPseudocodeTemplate = async (req, res) => {
     if (!room) return res.status(404).json({ status: false, message: "Room not found" });
 
     const materiId = room.materiId.toString();
-    let template, blanks, expectedFull, materiType;
-
-    switch (materiId) {
-      // MATERI 1: SIMPLE IF
-      case '1':
-        template = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
     
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ENDIF
-
-END`;
-        blanks = [
-          { id: 0, hint: "Nama variabel input", expected: "angka", position: "read" },
-          { id: 1, hint: "Variabel kondisi", expected: "angka", position: "IF" },
-          { id: 2, hint: "Variabel output", expected: "angka", position: "write" }
-        ];
-        expectedFull = template;
-        materiType = "if-simple";
-        break;
-
-      // MATERI 2: IF-ELSE
-      case '2':
-        template = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
-    
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ___BLANK_0___
-        write("Angka ", angka, " adalah ___BLANK_1___")
-    ___BLANK_2___
-
-END`;
-        blanks = [
-          { id: 0, hint: "Struktur kondisi kedua", expected: "ELSE", position: "struktur" },
-          { id: 1, hint: "Hasil angka negatif", expected: "Negatif", position: "output" },
-          { id: 2, hint: "Penutup struktur", expected: "ENDIF", position: "penutup" }
-        ];
-        expectedFull = template.replace('___BLANK_0___', 'ELSE').replace('___BLANK_1___', 'Negatif').replace('___BLANK_2___', 'ENDIF');
-        materiType = "if-else";
-        break;
-
-      // MATERI 3: IF-ELSE-IF
-      case '3':
-        template = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
-    
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ___BLANK_0___ (angka < 0) THEN
-        write("Angka ", angka, " adalah Negatif")
-    ___BLANK_1___
-        write("Angka ", angka, " adalah Nol")
-    ___BLANK_2___
-
-END`;
-        blanks = [
-          { id: 0, hint: "Kondisi kedua", expected: "ELSE IF", position: "kedua" },
-          { id: 1, hint: "Kondisi terakhir", expected: "ELSE", position: "terakhir" },
-          { id: 2, hint: "Penutup semua", expected: "ENDIF", position: "penutup" }
-        ];
-        materiType = "if-elseif";
-        break;
-
-      default:
-        template = `DEKLARASI
+    // ✅ NEW TEMPLATE SESUAI REQUEST
+    const template = `DEKLARASI 
     ___BLANK_0___ : integer
 
-ALGORITMA
+ALGORITMA 
     read(___BLANK_1___)
     
-    IF (___BLANK_2___ > 0) THEN
-        write("Angka ", ___BLANK_3___, " adalah ___BLANK_4___")
-    ENDIF
+    IF (___BLANK_2___) THEN 
+        write("___BLANK_3___")
+    ENDIF 
 
 END`;
-        blanks = [
-          { id: 0, hint: "Nama variabel", expected: "angka" },
-          { id: 1, hint: "Input variabel", expected: "angka" },
-          { id: 2, hint: "Kondisi variabel", expected: "angka" },
-          { id: 3, hint: "Output variabel", expected: "angka" },
-          { id: 4, hint: "Hasil positif", expected: "Positif" }
-        ];
-        materiType = "default";
-    }
+
+    const blanks = [
+      { hint: "Nama variabel (contoh: angka)", expected: "angka" },
+      { hint: "Variabel input (contoh: angka)", expected: "angka" },
+      { hint: "Kondisi (contoh: angka > 0)", expected: "angka > 0" },
+      { hint: "Pesan output (contoh: Angka positif)", expected: "Angka positif" }
+    ];
 
     res.json({
       status: true,
       data: {
         template,
         blanks,
-        expectedFull,
-        materiType,
-        totalBlanks: blanks.length,
-        instruction: `Isi ${blanks.length} blank untuk melengkapi algoritma!`
+        expectedFull: template
+          .replace('___BLANK_0___', 'angka')
+          .replace('___BLANK_1___', 'angka')
+          .replace('___BLANK_2___', 'angka > 0')
+          .replace('___BLANK_3___', 'Angka positif'),
+        materiType: "if-simple-blanks",
+        totalBlanks: 4,
+        instruction: "Isi 4 blank untuk melengkapi algoritma IF sederhana!"
       }
     });
   } catch (error) {
@@ -729,9 +664,21 @@ END`;
       status: false, 
       message: "Gagal load template",
       data: { 
-        template: "ALGORITMA\n    read(input)\n    IF (input > 0) THEN\n        write('Positif')\n    ENDIF\nEND",
-        blanks: [],
-        materiType: "default"
+        template: `DEKLARASI 
+    ___BLANK_0___ : integer
+
+ALGORITMA 
+    read(___BLANK_1___)
+    IF (___BLANK_2___) THEN 
+        write("___BLANK_3___")
+    ENDIF 
+END`,
+        blanks: [
+          { hint: "Nama variabel" },
+          { hint: "Variabel input" },
+          { hint: "Kondisi" },
+          { hint: "Pesan output" }
+        ]
       }
     });
   }
