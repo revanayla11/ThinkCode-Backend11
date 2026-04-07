@@ -12,7 +12,7 @@ exports.getGameMap = async (req, res) => {
   try {
     const levels = await GameLevel.findAll({
       order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
-      attributes: ["id", "title", "levelNumber", "materiId", "materiName"]
+      attributes: ["id", "title", "levelNumber", "materi_id"]
     });
 
     let progress = [];
