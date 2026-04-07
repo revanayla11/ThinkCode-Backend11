@@ -1,13 +1,14 @@
 // routes/adminGameRoutes.js
 const express = require("express");
 const router = express.Router();
-const verifyAdmin = require("../middleware/verifyAdmin");
-const adminGameController = require("../controllers/adminGameController");
+const verifyToken = require("../../middleware/verifyToken");
+const isAdmin = require("../middleware/isAdmin");
+const ctrl = require("../controllers/adminGameController");
 
-router.get("/materi/:materiId/game-levels", verifyAdmin, adminGameController.getMateriGameLevels);
-router.get("/game/level/:levelId/questions", verifyAdmin, adminGameController.getLevelQuestions);
-router.post("/game/:levelId/question", verifyAdmin, adminGameController.createQuestion);
-router.put("/game/question/:id", verifyAdmin, adminGameController.updateQuestion);
-router.delete("/game/question/:id", verifyAdmin, adminGameController.deleteQuestion);
+router.get("/materi/:materiId/game-levels", verifyToken, isAdmin, ctrl.getMateriGameLevels);
+router.get("/game/level/:levelId/questions", verifyToken, isAdmin, ctrl.getLevelQuestions);
+router.post("/game/:levelId/question", verifyToken, isAdmin, ctrl.createQuestion);
+router.put("/game/question/:id", verifyToken, isAdmin, ctrl.updateQuestion);
+router.delete("/game/question/:id", verifyToken, isAdmin, ctrl.deleteQuestion);
 
 module.exports = router;
