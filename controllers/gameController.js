@@ -7,36 +7,60 @@ const User = require("../models/User");
 const gameController = {
   // 1. GAME MAP (Hearts + Simple Streak)
   getGameMap: async (req, res) => {
-    try {
-      const levels = await GameLevel.findAll({
-        order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
-        attributes: ["id", "title", "levelNumber", "materi_id", "reward_xp"]
-      });
+  try {
+    const allLevels = await GameLevel.findAll({
+      order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
+      attributes: ["id", "title", "levelNumber", "materi_id", "reward_xp"]
+    });
 
-      let progress = [];
-      let userStats = { xp: 0, streak: 1, hearts: 5, totalLevels: 0, completedLevels: 0 };
-
-      if (req.user) {
-        progress = await UserProgress.findAll({
-          where: { userId: req.user.id },
-          attributes: ["levelId", "completed", "score"]
-        });
-
-        const user = await User.findByPk(req.user.id, { attributes: ["xp", "hearts"] });
-        userStats = {
-          xp: user?.xp || 0,
-          hearts: user?.hearts || 5,
-          streak: 7, // Simple fake streak
-          totalLevels: levels.length,
-          completedLevels: progress.filter(p => p.completed).length
+    // ✅ GROUP BY MATERI_ID
+    const materiMap = {};
+    allLevels.forEach(level => {
+      const materiId = level.materi_id;
+      if (!materiMap[materiId]) {
+        materiMap[materiId] = {
+          materiId,
+          materiName: `Materi ${materiId}`, // Dynamic name
+          levels: []
         };
       }
+      materiMap[materiId].levels.push({
+        id: level.id,
+        title: level.title,
+        levelNumber: level.levelNumber,
+        reward_xp: level.reward_xp
+      });
+    });
 
-      res.json({ status: true, levels, progress, userStats });
-    } catch (err) {
-      res.status(500).json({ status: false, message: err.message });
+    const levels = Object.values(materiMap); // Convert ke array
+
+    let progress = [];
+    let userStats = { xp: 0, streak: 1, hearts: 5 };
+
+    if (req.user) {
+      progress = await UserProgress.findAll({
+        where: { userId: req.user.id },
+        attributes: ["levelId", "completed", "score"]
+      });
+
+      const user = await User.findByPk(req.user.id, { attributes: ["xp", "hearts"] });
+      userStats = {
+        xp: user?.xp || 0,
+        hearts: user?.hearts || 5,
+        streak: progress.length > 0 ? 7 : 1
+      };
     }
-  },
+
+    res.json({ 
+      status: true, 
+      levels,  // ✅ Sekarang grouped!
+      progress, 
+      userStats 
+    });
+  } catch (err) {
+    res.status(500).json({ status: false, message: err.message });
+  }
+},
 
   // 2. GET LEVEL
   getLevel: async (req, res) => {
