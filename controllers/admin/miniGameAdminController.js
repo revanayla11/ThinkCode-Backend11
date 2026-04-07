@@ -1,7 +1,7 @@
 // controllers/adminGameController.js
-const GameLevel = require("../models/GameLevel");
-const GameQuestion = require("../models/GameQuestion");
-const Materi = require("../models/Materi");
+const GameLevel = require("../../models/GameLevel");
+const GameQuestion = require("../../models/GameQuestion");
+const Materi = require("../../models/Materi");
 
 exports.getMateriGameLevels = async (req, res) => {
   try {
