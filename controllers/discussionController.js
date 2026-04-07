@@ -257,8 +257,14 @@ exports.useClue = async (req, res) => {
       if (member.xp < cost) {
         await transaction.rollback();
         return res.status(400).json({
-          message: `XP anggota ${member.userId} tidak cukup (${member.xp}/${cost}). Semua anggota butuh ${cost} XP.`,
-        });
+  message: "XP tidak mencukupi untuk membuka clue",
+  detail: {
+    userId: member.userId,
+    currentXp: member.xp,
+    requiredXp: cost,
+  },
+  suggestion: "Kumpulkan XP terlebih dahulu dengan menyelesaikan Mini Game 🎮",
+});
       }
 
       member.xp -= cost;
@@ -772,7 +778,7 @@ exports.validateWorkspace = async (req, res) => {
 exports.startRoomTimer = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const duration = 5400 * 1000; // 60 minutes
+    const duration = 100 * 1000; // 60 minutes
     const timerEnd = new Date(Date.now() + duration);
     
     await DiscussionRoom.update(
@@ -783,7 +789,7 @@ exports.startRoomTimer = async (req, res) => {
     res.json({ 
       status: true, 
       timerEnd: timerEnd.toISOString(), 
-      duration: 3600,
+      duration: 100,
       message: "Timer dimulai - 60 menit" 
     });
   } catch (error) {
@@ -798,7 +804,7 @@ exports.checkTimerStatus = async (req, res) => {
     const room = await DiscussionRoom.findByPk(roomId);
     
     if (!room?.timerEnd) {
-      return res.json({ timeLeft: 5400, overtimeMinutes: 0, penaltyXP: 0, expired: false });
+      return res.json({ timeLeft: 3600, overtimeMinutes: 0, penaltyXP: 0, expired: false });
     }
     
     const now = Date.now();
