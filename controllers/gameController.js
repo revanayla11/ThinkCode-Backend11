@@ -5,73 +5,33 @@ const UserProgress = require("../models/UserProgress");
 const User = require("../models/User");
 const Badge = require("../models/Badge");
 const UserBadge = require("../models/UserBadge");
-const UserStreak = require("../models/UserStreak"); // Tambah model ini
+// HAPUS: const UserStreak = require("../models/UserStreak");
 
-/* ================= GET GAME MAP (LEVELS + PROGRESS + STATS) ================= */
+/* ================= GET GAME MAP ================= */
 exports.getGameMap = async (req, res) => {
   try {
     const levels = await GameLevel.findAll({
       order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
-      attributes: {
-        include: ["id", "title", "levelNumber", "materiId", "materiName"]
-      }
+      attributes: ["id", "title", "levelNumber", "materiId", "materiName"]
     });
 
     let progress = [];
-    let userStats = { xp: 0, streak: 0, totalLevels: 0, completedLevels: 0 };
+    let userStats = { xp: 0, streak: 1, totalLevels: 0, completedLevels: 0 }; // Simple streak
 
     if (req.user) {
-      // Progress
       progress = await UserProgress.findAll({
         where: { userId: req.user.id },
         attributes: ["levelId", "completed", "score"]
       });
 
-      // User stats
-      const user = await User.findByPk(req.user.id, {
-        attributes: ["xp"]
-      });
+      const user = await User.findByPk(req.user.id, { attributes: ["xp"] });
       userStats.xp = user?.xp || 0;
-
-      // Streak calculation
-      const today = new Date().toISOString().split('T')[0];
-      const userStreak = await UserStreak.findOne({ where: { userId: req.user.id } });
-      
-      if (userStreak) {
-        const lastCompleted = new Date(userStreak.lastCompleted);
-        const todayDate = new Date(today);
-        
-        if (lastCompleted.toISOString().split('T')[0] === today) {
-          userStats.streak = userStreak.streakCount;
-        } else if (lastCompleted.getTime() === todayDate.getTime() - 86400000) {
-          userStats.streak = userStreak.streakCount + 1;
-          userStreak.streakCount += 1;
-          userStreak.lastCompleted = today;
-          await userStreak.save();
-        } else {
-          userStreak.streakCount = 1;
-          userStreak.lastCompleted = today;
-          await userStreak.save();
-          userStats.streak = 1;
-        }
-      } else {
-        await UserStreak.create({ userId: req.user.id, streakCount: 1, lastCompleted: today });
-        userStats.streak = 1;
-      }
-
-      // Total & completed levels
       userStats.totalLevels = levels.length;
       userStats.completedLevels = progress.filter(p => p.completed).length;
     }
 
-    res.json({ 
-      status: true, 
-      levels, 
-      progress,
-      userStats 
-    });
+    res.json({ status: true, levels, progress, userStats });
   } catch (err) {
-    console.error("GET GAME MAP ERROR:", err);
     res.status(500).json({ status: false, message: err.message });
   }
 };
@@ -80,13 +40,8 @@ exports.getGameMap = async (req, res) => {
 exports.getProgress = async (req, res) => {
   try {
     const progress = await UserProgress.findAll({
-      where: { userId: req.user.id },
-      include: [{
-        model: GameLevel,
-        attributes: ["title", "levelNumber", "materiName"]
-      }]
+      where: { userId: req.user.id }
     });
-
     res.json({ status: true, data: progress });
   } catch (err) {
     res.status(500).json({ status: false, message: err.message });
@@ -96,58 +51,41 @@ exports.getProgress = async (req, res) => {
 /* ================= GET SINGLE LEVEL ================= */
 exports.getLevel = async (req, res) => {
   try {
-    const level = await GameLevel.findByPk(req.params.id, {
-      include: [{ model: Badge }]
-    });
-    
-    if (!level) {
-      return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
-    }
+    const level = await GameLevel.findByPk(req.params.id);
+    if (!level) return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
 
     const questions = await GameQuestion.findAll({
       where: { levelId: level.id },
       order: [["id", "ASC"]],
     });
 
-    // Fix meta JSON
     const fixedQuestions = questions.map(q => {
       let meta = q.meta;
       if (typeof meta === "string") {
-        try {
-          meta = JSON.parse(meta);
-        } catch {
-          meta = {};
-        }
+        try { meta = JSON.parse(meta); } catch { meta = {}; }
       }
       return { ...q.dataValues, meta };
     });
 
     res.json({ status: true, level: level.dataValues, questions: fixedQuestions });
   } catch (err) {
-    console.error("GET LEVEL ERROR:", err);
     res.status(500).json({ status: false, message: err.message });
   }
 };
 
-/* ================= SUBMIT LEVEL (FULL GAMIFICATION) ================= */
+/* ================= SUBMIT LEVEL ================= */
 exports.submitLevel = async (req, res) => {
   try {
     const userId = req.user.id;
     const levelId = req.params.id;
     const answers = req.body.answers || [];
 
-    const level = await GameLevel.findByPk(levelId, {
-      include: [{ model: Badge }]
-    });
-
-    if (!level) {
-      return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
-    }
+    const level = await GameLevel.findByPk(levelId);
+    if (!level) return res.status(404).json({ status: false });
 
     let correct = 0;
     const total = answers.length;
 
-    // Hitung skor
     for (const ans of answers) {
       const q = await GameQuestion.findByPk(ans.questionId);
       if (!q) continue;
@@ -156,149 +94,58 @@ exports.submitLevel = async (req, res) => {
       if (typeof meta === "string") meta = JSON.parse(meta);
 
       let isCorrect = false;
-
       switch (q.type) {
-        case "mcq":
-          isCorrect = Number(ans.answer) === Number(meta.answerIndex);
-          break;
-        case "truefalse":
-          isCorrect = Boolean(ans.answer) === Boolean(meta.isTrue);
-          break;
+        case "mcq": isCorrect = Number(ans.answer) === Number(meta.answerIndex); break;
+        case "truefalse": isCorrect = Boolean(ans.answer) === Boolean(meta.isTrue); break;
         case "essay":
-        case "typing":
-        case "fill":
-          isCorrect = String(ans.answer)
-            ?.trim()
-            ?.toLowerCase() === String(meta.answer)?.trim()?.toLowerCase();
-          break;
-        case "flashcard":
-          isCorrect = ans.answer === 'correct';
-          break;
-        case "matching":
-          isCorrect = meta.pairs?.every((pair, i) => 
-            Number(ans.answer?.[i]) === Number(pair.answerIndex)
-          ) || false;
-          break;
-        default:
-          isCorrect = false;
+        case "typing": 
+          isCorrect = String(ans.answer).trim().toLowerCase() === String(meta.answer).trim().toLowerCase(); break;
+        case "flashcard": isCorrect = ans.answer === 'correct'; break;
+        default: isCorrect = false;
       }
 
       if (isCorrect) correct++;
     }
 
-    const scorePercent = Math.round((correct / total) * 100);
-    const passThreshold = 60;
-    const isPassed = scorePercent >= passThreshold;
-    
-    // XP calculation berdasarkan performa
-    let gainedXp = 0;
-    if (scorePercent >= 90) gainedXp = level.reward_xp * 2;      // Perfect
-    else if (scorePercent >= 80) gainedXp = level.reward_xp * 1.5; // Great  
-    else if (scorePercent >= passThreshold) gainedXp = level.reward_xp;     // Pass
-    else gainedXp = 5; // Participation
+    const scorePercent = total > 0 ? Math.round((correct / total) * 100) : 0;
+    const gainedXp = scorePercent >= 60 ? (level.reward_xp || 10) : 5;
 
-    // Simpan/ Update progress
     await UserProgress.upsert({
-      userId,
-      levelId,
-      completed: isPassed,
-      score: scorePercent,
-      attempts: { [Op.add]: 1 }
+      userId, levelId,
+      completed: scorePercent >= 60,
+      score: scorePercent
     });
 
-    // Tambah XP user
     const user = await User.findByPk(userId);
-    user.xp += gainedXp;
+    user.xp = (user.xp || 0) + gainedXp;
     await user.save();
-
-    // Update streak
-    const today = new Date().toISOString().split('T')[0];
-    let userStreak = await UserStreak.findOne({ where: { userId } });
-    
-    if (!userStreak) {
-      userStreak = await UserStreak.create({
-        userId,
-        streakCount: 1,
-        lastCompleted: today
-      });
-    } else {
-      const lastDate = new Date(userStreak.lastCompleted);
-      const todayDate = new Date(today);
-      
-      if (lastDate.toISOString().split('T')[0] === today) {
-        // Sudah main hari ini, streak tetap
-      } else if (lastDate.getTime() === todayDate.getTime() - 86400000) {
-        // Kemarin main, streak +1
-        userStreak.streakCount += 1;
-      } else {
-        // Gap > 1 hari, reset streak
-        userStreak.streakCount = 1;
-      }
-      userStreak.lastCompleted = today;
-      await userStreak.save();
-    }
-
-    // Badge untuk perfect score
-    let badge = null;
-    if (scorePercent === 100 && level.Badge) {
-      const [userBadge, created] = await UserBadge.findOrCreate({
-        where: { user_id: userId, badge_id: level.Badge.id },
-        defaults: { user_id: userId, badge_id: level.Badge.id }
-      });
-      
-      if (created) {
-        badge = {
-          badge_name: level.Badge.badge_name,
-          image: `${process.env.BASE_URL || ''}${level.Badge.image}`,
-          description: level.Badge.description
-        };
-      }
-    }
 
     res.json({
       status: true,
-      total,
-      correct,
-      scorePercent,
-      isPassed,
-      gainedXp,
+      total, correct, scorePercent, gainedXp,
       totalXp: user.xp,
-      streak: userStreak.streakCount,
-      badge
+      streak: 1
     });
-
   } catch (err) {
-    console.error("SUBMIT LEVEL ERROR:", err);
-    res.status(500).json({
-      status: false,
-      message: err.message,
-    });
+    res.status(500).json({ status: false, message: err.message });
   }
 };
 
 /* ================= GET USER STATS ================= */
 exports.getUserStats = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const user = await User.findByPk(req.user.id, { attributes: ["xp"] });
+    const progress = await UserProgress.findAll({ where: { userId: req.user.id } });
     
-    const user = await User.findByPk(userId, { attributes: ["xp"] });
-    const streak = await UserStreak.findOne({ where: { userId } });
-    const progress = await UserProgress.findAll({
-      where: { userId },
-      attributes: ["completed", "score"]
+    res.json({
+      status: true,
+      stats: {
+        xp: user?.xp || 0,
+        streak: 1,
+        totalLevels: progress.length,
+        completedLevels: progress.filter(p => p.completed).length
+      }
     });
-    
-    const stats = {
-      xp: user?.xp || 0,
-      streak: streak?.streakCount || 0,
-      totalLevels: progress.length,
-      completedLevels: progress.filter(p => p.completed).length,
-      avgScore: progress.length > 0 
-        ? Math.round(progress.reduce((sum, p) => sum + p.score, 0) / progress.length)
-        : 0
-    };
-
-    res.json({ status: true, stats });
   } catch (err) {
     res.status(500).json({ status: false, message: err.message });
   }
@@ -312,7 +159,6 @@ exports.getLeaderboard = async (req, res) => {
       order: [["xp", "DESC"]],
       limit: 10
     });
-
     res.json({ status: true, leaderboard: topUsers });
   } catch (err) {
     res.status(500).json({ status: false, message: err.message });
