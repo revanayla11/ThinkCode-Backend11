@@ -6,15 +6,15 @@ const User = require("../models/User");
 const Badge = require("../models/Badge");
 const UserBadge = require("../models/UserBadge");
 const Materi = require("../models/Materi");
-const { Sequelize } = require('sequelize');
+const { Op, Sequelize } = require('sequelize');
 
-/* ================= 1. GAME MAP (BARU) ================= */
 exports.getGameMap = async (req, res) => {
   try {
     const levels = await GameLevel.findAll({
       include: [{
         model: Materi, 
-        attributes: ['id', 'title']
+        attributes: ['id', 'title'],
+        as: 'Materi'
       }],
       order: [['materi_id', 'ASC'], ['levelNumber', 'ASC']],
       where: { isActive: true }
@@ -26,152 +26,179 @@ exports.getGameMap = async (req, res) => {
       materiName: lvl.Materi.title,
       levelNumber: lvl.levelNumber,
       title: lvl.title,
-      type: lvl.type || 'quiz',
+      type: lvl.type,
       reward_xp: lvl.reward_xp
     }));
 
     res.json({ status: true, levels: transformedLevels });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ status: false, message: err.message });
   }
 };
 
-/* ================= 2. GET LEVELS ================= */
-exports.getLevels = async (req, res) => {
-  try {
-    const levels = await GameLevel.findAll({
-      order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
-    });
-    res.json({ status: true, data: levels });
-  } catch (err) {
-    res.status(500).json({ status: false, message: err.message });
-  }
-};
-
-/* ================= 3. USER PROGRESS ================= */
 exports.getProgress = async (req, res) => {
   try {
     const progress = await UserProgress.findAll({
       where: { userId: req.user.id },
+      attributes: ['levelId', 'completed', 'score']
     });
-    res.json({ status: true, data: progress });
+    res.json({ status: true, progress });
   } catch (err) {
     res.status(500).json({ status: false, message: err.message });
   }
 };
 
-/* ================= 4. GET LEVEL BY ID ================= */
 exports.getLevel = async (req, res) => {
   try {
-    const level = await GameLevel.findByPk(req.params.id);
+    const level = await GameLevel.findByPk(req.params.id, {
+      include: [{ 
+        model: Materi, 
+        attributes: ['title'] 
+      }]
+    });
+    
     if (!level) {
       return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
     }
 
     const questions = await GameQuestion.findAll({
       where: { levelId: level.id },
-      order: [["id", "ASC"]],
+      order: [["order", "ASC"], ["id", "ASC"]]
     });
 
-    res.json({ status: true, level, questions });
+    res.json({ 
+      status: true, 
+      level: level.toJSON(),
+      questions: questions.map(q => q.toJSON())
+    });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ status: false, message: err.message });
   }
 };
 
-/* ================= 5. SUBMIT LEVEL (FULL SUPPORT) ================= */
 exports.submitLevel = async (req, res) => {
   try {
     const userId = req.user.id;
     const levelId = req.params.id;
     const answers = req.body.answers || [];
 
-    const level = await GameLevel.findByPk(levelId, { include: [{ model: Badge }] });
-    if (!level) return res.status(404).json({ status: false });
+    const level = await GameLevel.findByPk(levelId, { 
+      include: [{ model: Badge, as: 'Badge' }] 
+    });
+    if (!level) return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
 
     let correct = 0, total = 0;
 
     for (const ans of answers) {
-      const q = await GameQuestion.findByPk(ans.questionId);
-      if (!q) continue;
+      const question = await GameQuestion.findByPk(ans.questionId);
+      if (!question) continue;
 
-      let meta = typeof q.meta === "string" ? JSON.parse(q.meta) : q.meta;
+      let meta = question.meta;
       total++;
 
-      switch (q.type) {
+      let isCorrect = false;
+
+      switch (question.type) {
         case "mcq":
-          if (Number(ans.answer) === Number(meta.answerIndex)) correct++;
+          isCorrect = Number(ans.answer) === Number(meta.answerIndex);
           break;
+          
         case "truefalse":
-          if (Boolean(ans.answer) === Boolean(meta.isTrue)) correct++;
+        case "dragdrop":
+        case "flashcard":
+          isCorrect = String(ans.answer).trim().toLowerCase() === 
+                     String(meta.isTrue || meta.correctZone || 'true').toLowerCase();
           break;
+          
         case "essay":
         case "typing":
-        case "fill":
-          if (String(ans.answer).trim().toLowerCase() === String(meta.answer).trim().toLowerCase()) correct++;
+          isCorrect = String(ans.answer).trim().toLowerCase() === 
+                     String(meta.answer).trim().toLowerCase();
           break;
-        case "dragdrop":
-          if (String(ans.answer).trim() === String(meta.correctZone)) correct++;
+          
+        case "sort":
+          isCorrect = JSON.stringify(ans.answer.sort()) === 
+                     JSON.stringify((meta.correctOrder || meta.items || []).sort());
           break;
+          
+        case "memory":
+          isCorrect = String(ans.answer) === String(meta.cardPair);
+          break;
+          
+        case "hangman":
+          isCorrect = String(ans.answer).trim().toLowerCase() === 
+                     String(meta.word).trim().toLowerCase();
+          break;
+          
+        default:
+          isCorrect = false;
       }
+
+      if (isCorrect) correct++;
     }
 
     const scorePercent = total > 0 ? Math.round((correct / total) * 100) : 0;
-    const gainedXp = scorePercent >= 70 ? level.reward_xp : Math.floor(level.reward_xp * 0.3);
+    const passThreshold = 70;
+    const isPassed = scorePercent >= passThreshold;
+    const gainedXp = isPassed ? level.reward_xp : Math.floor(level.reward_xp * 0.3);
 
-    // Save progress
+    // Update/Insert progress
     await UserProgress.upsert({
-      userId, levelId,
-      completed: scorePercent >= 70,
+      userId,
+      levelId,
+      completed: isPassed ? 1 : 0,
       score: scorePercent,
-      attempts: Sequelize.literal('COALESCE(attempts, 0) + 1')
+      attempts: Sequelize.literal('COALESCE(attempts, 0) + 1'),
+      updatedAt: new Date()
     });
 
     // Add XP
-    await User.increment('xp', { by: gainedXp, where: { id: userId } });
-    const user = await User.findByPk(userId, { attributes: ['xp'] });
-
-    // Badge
-    let badge = null;
-    if (scorePercent === 100 && level.Badge) {
-      await UserBadge.findOrCreate({
-        where: { user_id: userId, badge_id: level.Badge.id }
-      });
-      badge = {
-        badge_name: level.Badge.badge_name,
-        image: `${process.env.BASE_URL}${level.Badge.image}`
-      };
-    }
-
-    res.json({
-      status: true, total, correct, scorePercent, gainedXp,
-      totalXpUser: user.xp, badge
+    await User.increment('xp', { 
+      by: gainedXp, 
+      where: { id: userId } 
     });
-  } catch (err) {
-    console.error("SUBMIT ERROR:", err);
-    res.status(500).json({ status: false, message: err.message });
-  }
-};
+    
+    const updatedUser = await User.findByPk(userId, { 
+      attributes: ['xp'] 
+    });
 
-/* ================= 6. ADD XP ================= */
-exports.addXp = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { xp } = req.body;
-
-    if (!xp || Number(xp) <= 0) {
-      return res.status(400).json({ status: false, message: "XP tidak valid" });
+    // Check and award badge
+    let badge = null;
+    if (isPassed && scorePercent === 100 && level.reward_badge_id) {
+      const [userBadge, created] = await UserBadge.findOrCreate({
+        where: { 
+          user_id: userId, 
+          badge_id: level.reward_badge_id 
+        },
+        defaults: { user_id: userId, badge_id: level.reward_badge_id }
+      });
+      
+      if (created) {
+        const badgeData = await Badge.findByPk(level.reward_badge_id);
+        if (badgeData) {
+          badge = {
+            badge_name: badgeData.badge_name,
+            image: `${process.env.BASE_URL || ''}/uploads/badges/${badgeData.image}`
+          };
+        }
+      }
     }
-
-    await User.increment('xp', { by: Number(xp), where: { id: userId } });
-    const updatedUser = await User.findByPk(userId, { attributes: ["id", "xp"] });
 
     res.json({
       status: true,
-      message: "XP berhasil ditambahkan",
-      xp: updatedUser.xp
+      total,
+      correct,
+      scorePercent,
+      gainedXp,
+      totalXpUser: updatedUser.xp,
+      badge,
+      passed: isPassed
     });
+
   } catch (err) {
-    res.status(500).json({ status: false, message: "Gagal menambahkan XP" });
+    console.error("SUBMIT ERROR:", err);
+    res.status(500).json({ status: false, message: err.message });
   }
 };

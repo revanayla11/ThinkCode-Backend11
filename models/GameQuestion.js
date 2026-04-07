@@ -1,3 +1,4 @@
+// models/GameQuestion.js
 module.exports = (sequelize, DataTypes) => {
   const GameQuestion = sequelize.define("GameQuestion", {
     id: {
@@ -5,30 +6,40 @@ module.exports = (sequelize, DataTypes) => {
       primaryKey: true,
       autoIncrement: true,
     },
-    levelId: DataTypes.INTEGER,
-    content: DataTypes.TEXT,
+    levelId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: 'levelId'
+    },
+    content: {
+      type: DataTypes.TEXT,
+      allowNull: false
+    },
     type: {
       type: DataTypes.ENUM(
-        "mcq",
-        "essay",
-        "truefalse",
-        "dragdrop",
-        "typing",
-        "sort"
+        "mcq", "essay", "truefalse", "dragdrop", 
+        "typing", "sort", "memory", "flashcard", "hangman"
       ),
       defaultValue: "mcq",
     },
-    meta: DataTypes.JSON,
+    meta: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
     points: {
       type: DataTypes.INTEGER,
       defaultValue: 10,
     },
+    order: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0
+    }
   });
 
-  // ✅ RELASI
   GameQuestion.associate = (models) => {
     GameQuestion.belongsTo(models.GameLevel, {
       foreignKey: "levelId",
+      as: 'Level'
     });
   };
 

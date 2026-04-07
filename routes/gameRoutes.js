@@ -4,12 +4,12 @@ const router = express.Router();
 const verifyToken = require("../middleware/verifyToken");
 const gameController = require("../controllers/gameController");
 
-// ✅ PASTIKAN EXPORT SESUAI ROUTE
-router.get("/map", gameController.getGameMap);           // ✅ Baru
-router.get("/levels", gameController.getLevels);
+// Public routes
+router.get("/map", gameController.getGameMap);
 router.get("/level/:id", gameController.getLevel);
+
+// Protected routes
 router.get("/progress", verifyToken, gameController.getProgress);
 router.post("/submit/:id", verifyToken, gameController.submitLevel);
-router.post("/xp", verifyToken, gameController.addXp);
 
 module.exports = router;
