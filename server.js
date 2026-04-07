@@ -3,14 +3,10 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const path = require("path");
-const sequelize = require("./config/db");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const models = require("./models"); 
-const db = {};
 
 
-
-console.log("JWT SECRET:", process.env.JWT_SECRET);
 
 
 const app = express();
@@ -120,12 +116,11 @@ app.get("/health", (req, res) => {
 // ====== START SERVER + SYNC DATABASE ====== //
 const startServer = async () => {
   try {
-    await sequelize.authenticate();
+    await models.sequelize.authenticate(); 
     console.log("✅ Database connected");
 
-    await models.sequelize.sync({ alter: true });
+    await models.sequelize.sync({ alter: false });
 
-    // Start server setelah semua tabel siap
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on port ${PORT}`);
     });

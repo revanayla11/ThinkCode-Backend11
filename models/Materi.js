@@ -24,6 +24,14 @@ const Materi = sequelize.define(
       type: DataTypes.INTEGER,
       defaultValue: 1,
     },
+    createdAt: {
+  type: DataTypes.DATE,
+  allowNull: true // ✅ penting
+},
+updatedAt: {
+  type: DataTypes.DATE,
+  allowNull: true
+},
   },
   {
     tableName: "materi",

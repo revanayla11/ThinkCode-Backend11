@@ -101,6 +101,7 @@ Materi.hasOne(MateriAnswer, { foreignKey: "materiId", as: "answer" });
 MateriAnswer.belongsTo(Materi, { foreignKey: "materiId", as: "materi" });
 
 module.exports = {
+  sequelize,
   User,
   Materi,
   MateriAnswer,
