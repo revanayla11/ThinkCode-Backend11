@@ -2,6 +2,8 @@ const multer = require("multer");
 const path = require("path");
 const Submission = require("../models/Submission");
 const Badge = require("../models/Badge");
+const User = require("../models/User");
+const Materi = require("../models/Materi");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) =>
@@ -13,7 +15,7 @@ const storage = multer.diskStorage({
 const uploadMiddleware = multer({ storage });
 exports.uploadMiddleware = uploadMiddleware.single("file");
 
-// Upload jawaban
+// Upload jawaban (NO CHANGES)
 exports.uploadAnswer = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -35,6 +37,7 @@ exports.uploadAnswer = async (req, res) => {
   }
 };
 
+// Get uploads by user (NO CHANGES)
 exports.getUploadsByUser = async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -52,6 +55,7 @@ exports.getUploadsByUser = async (req, res) => {
   }
 };
 
+// Get last upload (NO CHANGES)
 exports.getLastUpload = async (req, res) => {
   try {
     const { userId, materiId } = req.params;
@@ -71,5 +75,73 @@ exports.getLastUpload = async (req, res) => {
   } catch (err) {
     console.error("LAST UPLOAD ERROR:", err);
     res.status(500).json({ status: false });
+  }
+};
+
+// BARU: Check rooms completion & random picker
+exports.checkRoomsCompletion = async (req, res) => {
+  try {
+    const { materiId, userId } = req.params;
+    
+    // Ambil materi
+    const materi = await Materi.findByPk(materiId);
+    
+    if (!materi) {
+      return res.json({ allCompleted: false, randomPresenter: null });
+    }
+
+    // Cek submissions user untuk materi ini
+    const userSubmissions = await Submission.findAll({
+      where: { userId, materiId },
+      include: [{ model: User, as: "User" }]
+    });
+
+    // Jika ada submission, berarti sudah selesai untuk materi ini
+    const allCompleted = userSubmissions.length > 0;
+
+    let randomPresenter = null;
+    
+    if (allCompleted) {
+      // Random picker: ambil top submissions untuk materi ini
+      const topSubmissions = await Submission.findAll({
+        where: { materiId },
+        include: [
+          { model: User, as: "User" }
+        ],
+        order: [
+          ['score', 'DESC'], 
+          ['createdAt', 'DESC']
+        ],
+        limit: 20 // Ambil 20 teratas untuk random pick
+      });
+
+      if (topSubmissions.length > 0) {
+        // Pilih random dari top 20
+        const randomIndex = Math.floor(Math.random() * topSubmissions.length);
+        const selected = topSubmissions[randomIndex];
+        
+        randomPresenter = {
+          name: selected.User?.name || `User ${selected.userId}`,
+          roomName: selected.roomName || `Room ${selected.id.slice(-4)}`,
+          score: selected.score || 0,
+          userId: selected.userId
+        };
+      }
+    }
+
+    res.json({ 
+      allCompleted, 
+      randomPresenter,
+      totalSubmissions: userSubmissions.length,
+      userSubmissions: userSubmissions.map(s => ({
+        id: s.id,
+        score: s.score,
+        createdAt: s.createdAt
+      }))
+    });
+
+  } catch (err) {
+    console.error("ROOMS COMPLETION ERROR:", err);
+    res.status(500).json({ allCompleted: false, randomPresenter: null });
   }
 };
