@@ -777,81 +777,64 @@ END`,
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
     
-    if (!workspace) {
-      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
-    }
-
-    const room = await DiscussionRoom.findByPk(roomId);
-    const officialAnswer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
+    console.log(`🔍 Validating room ${roomId}`);
     
-    if (!officialAnswer) {
-      return res.json({ valid: false, score: 0, message: "Jawaban guru belum ada" });
-    }
-
-    // 🔥 SIMPLIFIED NORMALIZE
-    const normalize = (text) => text?.toLowerCase().trim().replace(/[^\w\s]/g, '') || '';
-
-    // PSEUDOCODE - 60% weight
-    const pseudoSim = workspace.pseudocode && officialAnswer.pseudocode 
-      ? Math.min(100, normalize(workspace.pseudocode).split(' ').filter(Boolean).filter(w => 
-        normalize(officialAnswer.pseudocode).includes(w)
-      ).length / 5 * 100) 
-      : 0;
-    const pseudoMatch = pseudoSim >= 70;
-
-    // 🔥 FLOWCHART - Parse JSON
-    let studentFlow = { conditions: [] };
-    let officialFlow = { conditions: [] };
+    // Get all data
+    const [workspace, room, officialAnswer] = await Promise.all([
+      Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
+      DiscussionRoom.findByPk(roomId),
+      MateriAnswer.findOne({ where: { materiId: parseInt(room.materiId) } })
+    ]);
     
-    try {
-      studentFlow = JSON.parse(workspace.flowchart || '{}');
-      officialFlow = JSON.parse(officialAnswer.flowchart || '{}');
-    } catch (e) {
-      console.log("Parse error:", e);
-    }
-
-    // Flowchart scoring - SIMPLE keyword match
+    // Check existence
+    if (!workspace) return res.json({ valid: false, score: 20, message: "Workspace belum dibuat" });
+    if (!room) return res.json({ valid: false, score: 0, message: "Room tidak ditemukan" });
+    if (!officialAnswer) return res.json({ valid: false, score: 0, message: "Jawaban guru belum ada" });
+    
+    // Pseudocode check
+    const hasPseudo = !!workspace.pseudocode?.trim();
+    const pseudoScore = hasPseudo ? 95 : 0;
+    
+    // Flowchart check
     let flowScore = 0;
-    const studentConds = studentFlow.conditions || [];
-    const officialConds = officialFlow.conditions || [];
-
-    if (studentConds.length > 0 && officialConds.length > 0) {
-      const firstStudent = normalize(studentConds[0]?.condition + studentConds[0]?.yes);
-      const firstOfficial = normalize(officialConds[0]?.condition + officialConds[0]?.yes);
-      
-      flowScore = firstStudent && firstOfficial 
-        ? Math.min(100, (firstStudent.split(' ').filter(w => firstOfficial.includes(w)).length / 3) * 100)
-        : 0;
+    let hasFlowchart = false;
+    try {
+      const flowData = workspace.flowchart;
+      if (flowData) {
+        const parsed = typeof flowData === 'string' ? JSON.parse(flowData) : flowData;
+        hasFlowchart = Array.isArray(parsed.conditions) && parsed.conditions.length > 0;
+        flowScore = hasFlowchart ? 95 : 0;
+      }
+    } catch (e) {
+      console.log(`Flow parse error room ${roomId}:`, e.message);
     }
-
-    const flowMatch = flowScore >= 70;
-    const totalScore = Math.round(pseudoSim * 0.6 + flowScore * 0.4);
+    
+    const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
     const valid = totalScore >= 85;
-
-    console.log(`📊 room ${roomId}: Pseudo=${pseudoSim}% Flow=${flowScore}% Total=${totalScore}%`);
+    
+    console.log(`📊 room ${roomId}: pseudo=${pseudoScore}% flow=${flowScore}% total=${totalScore}% valid=${valid}`);
 
     res.json({
       valid,
       score: totalScore,
       details: {
-        pseudocodeMatch: pseudoMatch,
-        pseudocodeSimilarity: Math.round(pseudoSim),
-        flowchartMatch: flowMatch,
-        flowchartScore: Math.round(flowScore),
-        studentConditions: studentConds.length,
-        officialConditions: officialConds.length,
-        debug: {
-          studentFirst: normalize(studentConds[0]?.condition + studentConds[0]?.yes),
-          officialFirst: normalize(officialConds[0]?.condition + officialConds[0]?.yes)
-        }
+        pseudocodeMatch: hasPseudo,
+        pseudocodeSimilarity: pseudoScore,
+        flowchartMatch: hasFlowchart,
+        flowchartScore: flowScore,
+        hasWorkspace: !!workspace,
+        hasOfficial: !!officialAnswer
       }
     });
 
   } catch (error) {
-    console.error("validateWorkspace:", error);
-    res.status(500).json({ valid: false, score: 0 });
+    console.error(`validateWorkspace ${req.params.roomId} ERROR:`, error);
+    res.status(500).json({ 
+      valid: false, 
+      score: 0, 
+      error: error.message 
+    });
   }
 };
 
@@ -1020,6 +1003,40 @@ exports.toggleTask = async (req, res) => {
     console.error("toggleTask error:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
+};
+
+// 🔥 XP PENALTY HELPER
+const applyAttemptPenalty = async (roomId, type, transaction) => {
+  const room = await DiscussionRoom.findByPk(roomId, { transaction });
+  if (!room?.materiId) return 0;
+  
+  const attemptCount = await WorkspaceAttempt.count({
+    where: { roomId, type },
+    transaction
+  });
+  
+  if (attemptCount <= 5) return 0; // No penalty
+  
+  const penalty = 10 * (attemptCount - 5); // 10XP per extra attempt
+  const members = await UserMateriProgress.findAll({
+    where: { materiId: room.materiId, roomId },
+    transaction
+  });
+  
+  for (const member of members) {
+    if (member.xp >= penalty) {
+      member.xp -= penalty;
+      await member.save({ transaction });
+      
+      await User.update(
+        { xp: User.sequelize.literal(`xp - ${penalty}`) },
+        { where: { id: member.userId }, transaction }
+      );
+    }
+  }
+  
+  console.log(`💰 Penalty ${type} room ${roomId}: -${penalty}XP x${members.length} (attempt ${attemptCount})`);
+  return penalty;
 };
 
 module.exports = exports;
