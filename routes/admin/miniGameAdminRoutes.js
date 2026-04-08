@@ -1,23 +1,15 @@
 const express = require("express");
 const router = express.Router();
-const controller = require("../../controllers/admin/miniGameAdminController");
+const verifyToken = require("../../middleware/verifyToken");
+const isAdmin = require("../../middleware/isAdmin");
+const ctrl = require("../controllers/admin/adminMiniGameController");
 
-// ==================== MATERI ====================
-router.get("/materi", controller.getMateri);
+router.get("/materi", verifyToken, isAdmin, ctrl.getMateri);
 
-// ==================== BADGE ====================
-router.get("/badges", controller.getBadges);
+router.get("/:slug/levels", verifyToken, isAdmin, ctrl.getLevels);
+router.post("/:slug/levels", verifyToken, isAdmin, ctrl.addLevel);
 
-// ==================== LEVEL ====================
-router.get("/:slug/levels", controller.getLevelsByMateri);
-router.post("/:slug/levels", controller.addLevel);
-router.get("/:slug/levels/:levelNumber", controller.getLevelWithQuestions);
-router.delete("/level/:levelId", controller.deleteLevel);
-router.put("/level/:levelId", controller.updateLevel);
-
-// ==================== QUESTION ====================
-router.post("/:slug/levels/:levelNumber/question", controller.addQuestionBySlugLevel);
-router.delete("/question/:questionId", controller.deleteQuestion);
-router.put("/question/:id", controller.updateQuestion); 
+router.get("/:slug/levels/:levelNumber", verifyToken, isAdmin, ctrl.getQuestions);
+router.post("/:slug/levels/:levelNumber/question", verifyToken, isAdmin, ctrl.addQuestion);
 
 module.exports = router;

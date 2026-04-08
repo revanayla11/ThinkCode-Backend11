@@ -12,8 +12,13 @@ const GameLevel = sequelize.define(
     totalQuestions: { type: DataTypes.INTEGER, defaultValue: 10 },
     reward_xp: { type: DataTypes.INTEGER, defaultValue: 0 },
     reward_badge_id: { type: DataTypes.INTEGER, allowNull: true },
-    materi_id: { type: DataTypes.INTEGER, allowNull: false }, 
+    materi_id: { type: DataTypes.INTEGER, allowNull: false },
 
+    // 🔥 PENTING BANGET
+    gameType: {
+      type: DataTypes.ENUM("mcq", "typing", "truefalse", "dragdrop"),
+      defaultValue: "mcq",
+    },
   },
   {
     tableName: "game_levels",
@@ -22,6 +27,6 @@ const GameLevel = sequelize.define(
 );
 
 GameLevel.belongsTo(Materi, { foreignKey: "materi_id" });
-GameLevel.belongsTo(Badge, { foreignKey: "reward_badge_id"});
+GameLevel.belongsTo(Badge, { foreignKey: "reward_badge_id" });
 
 module.exports = GameLevel;
