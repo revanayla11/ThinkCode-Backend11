@@ -4,7 +4,7 @@ const GameQuestion = require("../../models/GameQuestion");
 const Badge = require("../../models/Badge");
 
 // ==================== MATERI ====================
-exports.getMateri = async (req, res) => {
+const getMateri = async (req, res) => {
   try {
     console.log("📚 Loading materi...");
     const materiList = await Materi.findAll({
@@ -19,7 +19,7 @@ exports.getMateri = async (req, res) => {
 };
 
 // ==================== BADGE ====================
-exports.getBadges = async (req, res) => {
+const getBadges = async (req, res) => {
   try {
     console.log("🏆 Loading badges...");
     const badges = await Badge.findAll();
@@ -32,7 +32,7 @@ exports.getBadges = async (req, res) => {
 };
 
 // ==================== LEVEL ====================
-exports.getLevelsByMateri = async (req, res) => {
+const getLevelsByMateri = async (req, res) => {
   try {
     const { slug } = req.params;
     console.log(`🔍 getLevelsByMateri: slug=${slug}`);
@@ -46,18 +46,13 @@ exports.getLevelsByMateri = async (req, res) => {
     const levels = await GameLevel.findAll({
       where: { materi_id: materi.id },
       order: [["levelNumber", "ASC"]],
-      attributes: [
-        'id', 'title', 'levelNumber', 'totalQuestions', 'reward_xp', 
-        'gameType', 'reward_badge_id'
-      ], 
-      include: [
-        {
-          model: Badge,
-          as: 'Badge', // 🔥 PASTIKAN alias di model
-          attributes: ["id", "badge_name", "image"],
-          required: false,
-        },
-      ],
+      attributes: ['id', 'title', 'levelNumber', 'totalQuestions', 'reward_xp', 'gameType', 'reward_badge_id'],
+      include: [{
+        model: Badge,
+        as: 'Badge',
+        attributes: ["id", "badge_name", "image"],
+        required: false,
+      }],
     });
 
     console.log(`✅ Found ${levels.length} levels for materi ${materi.id}`);
@@ -68,30 +63,27 @@ exports.getLevelsByMateri = async (req, res) => {
   }
 };
 
-exports.addLevel = async (req, res) => {
+const addLevel = async (req, res) => {
   try {
     const { slug } = req.params;
     console.log(`➕ addLevel: slug=${slug}`, req.body);
 
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      console.log(`❌ Materi not found: ${slug}`);
       return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
-    const levelData = {
+    const level = await GameLevel.create({
       title: req.body.title,
       levelNumber: parseInt(req.body.levelNumber),
-      totalQuestions: parseInt(req.body.totalQuestions),
-      reward_xp: parseInt(req.body.reward_xp),
-      gameType: req.body.gameType,
+      totalQuestions: parseInt(req.body.totalQuestions || 0),
+      reward_xp: parseInt(req.body.reward_xp || 0),
+      gameType: req.body.gameType || 'mcq',
       reward_badge_id: req.body.reward_badge_id || null,
       materi_id: materi.id,
-    };
+    });
 
-    const level = await GameLevel.create(levelData);
-    console.log(`✅ Level CREATED: ID=${level.id}, materi_id=${materi.id}`);
-
+    console.log(`✅ Level CREATED: ID=${level.id}`);
     res.json({ success: true, data: level });
   } catch (err) {
     console.error("❌ ERROR addLevel:", err);
@@ -99,14 +91,13 @@ exports.addLevel = async (req, res) => {
   }
 };
 
-exports.updateLevel = async (req, res) => {
+const updateLevel = async (req, res) => {
   try {
     const { levelId } = req.params;
-    console.log(`✏️ updateLevel: ${levelId}`, req.body);
+    console.log(`✏️ updateLevel: ${levelId}`);
 
     const level = await GameLevel.findByPk(levelId);
     if (!level) {
-      console.log(`❌ Level not found: ${levelId}`);
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
@@ -119,38 +110,29 @@ exports.updateLevel = async (req, res) => {
       reward_badge_id: req.body.reward_badge_id || null,
     });
 
-    const updatedLevel = await GameLevel.findByPk(levelId, {
-      include: [{ 
-        model: Badge, 
-        as: 'Badge',
-        attributes: ["id", "badge_name", "image"] 
-      }]
-    });
-
     console.log(`✅ Level UPDATED: ${levelId}`);
-    res.json({ success: true, message: "Level berhasil diupdate", data: updatedLevel });
+    res.json({ success: true, message: "Level berhasil diupdate", data: level });
   } catch (err) {
     console.error("❌ ERROR updateLevel:", err);
     res.status(500).json({ success: false, message: "Gagal update level" });
   }
 };
 
-exports.deleteLevel = async (req, res) => {
+const deleteLevel = async (req, res) => {
   try {
     const { levelId } = req.params;
     console.log(`🗑️ deleteLevel: ${levelId}`);
 
     const level = await GameLevel.findByPk(levelId);
     if (!level) {
-      console.log(`❌ Level not found: ${levelId}`);
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
-    // Hapus questions dulu
+    // Hapus questions terkait
     await GameQuestion.destroy({ where: { levelId: level.id } });
     await level.destroy();
 
-    console.log(`✅ Level DELETED: ${levelId} + ${await GameQuestion.count({ where: { levelId: level.id } })} questions`);
+    console.log(`✅ Level + questions DELETED: ${levelId}`);
     res.json({ success: true, message: "Level berhasil dihapus" });
   } catch (err) {
     console.error("❌ ERROR deleteLevel:", err);
@@ -159,14 +141,13 @@ exports.deleteLevel = async (req, res) => {
 };
 
 // ==================== LEVEL + QUESTION ====================
-exports.getLevelWithQuestions = async (req, res) => {
+const getLevelWithQuestions = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
-    console.log(`🔍 getLevelWithQuestions: slug=${slug}, levelNumber=${levelNumber}`);
+    console.log(`🔍 getLevelWithQuestions: ${slug}/${levelNumber}`);
 
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      console.log(`❌ Materi not found: ${slug}`);
       return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
@@ -175,14 +156,12 @@ exports.getLevelWithQuestions = async (req, res) => {
         materi_id: materi.id,
         levelNumber: parseInt(levelNumber),
       },
-      include: [
-        {
-          model: Badge,
-          as: 'Badge',
-          attributes: ["id", "badge_name", "image"],
-          required: false,
-        },
-      ],
+      include: [{
+        model: Badge,
+        as: 'Badge',
+        attributes: ["id", "badge_name", "image"],
+        required: false,
+      }],
     });
 
     if (!level) {
@@ -195,8 +174,8 @@ exports.getLevelWithQuestions = async (req, res) => {
       order: [["createdAt", "ASC"]]
     });
 
-    console.log(`✅ Level ${level.id} (${level.title}): ${questions.length} questions`);
-
+    console.log(`✅ Found ${questions.length} questions for level ${level.id}`);
+    
     res.json({
       success: true,
       data: {
@@ -211,16 +190,15 @@ exports.getLevelWithQuestions = async (req, res) => {
 };
 
 // ==================== QUESTION CRUD ====================
-exports.addQuestionBySlugLevel = async (req, res) => {
+const addQuestionBySlugLevel = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
     const { type, content, meta } = req.body;
     
-    console.log(`➕ addQuestion: slug=${slug}, level=${levelNumber}, type=${type}, content=${content?.substring(0,50)}`);
+    console.log(`➕ addQuestion: ${slug}/${levelNumber}, type=${type}`);
 
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      console.log(`❌ Materi not found: ${slug}`);
       return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
@@ -232,7 +210,7 @@ exports.addQuestionBySlugLevel = async (req, res) => {
     });
 
     if (!level) {
-      console.log(`❌ Level not found: materi_id=${materi.id}, levelNumber=${levelNumber}`);
+      console.log(`❌ Level not found for question: ${levelNumber}`);
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
@@ -243,28 +221,23 @@ exports.addQuestionBySlugLevel = async (req, res) => {
       meta: JSON.stringify(meta || {}),
     });
 
-    console.log(`✅ Question CREATED: ID=${question.id}, levelId=${level.id}, type=${type}`);
-    
-    res.json({
-      success: true,
-      data: question,
-    });
+    console.log(`✅ Question CREATED: ID=${question.id}, levelId=${level.id}`);
+    res.json({ success: true, data: question });
   } catch (err) {
     console.error("❌ ERROR addQuestionBySlugLevel:", err);
     res.status(500).json({ success: false, message: "Gagal tambah soal" });
   }
 };
 
-exports.updateQuestion = async (req, res) => {
+const updateQuestion = async (req, res) => {
   try {
     const { id } = req.params;
     const { content, type, meta } = req.body;
-    
-    console.log(`✏️ updateQuestion: ${id}, type=${type}`);
+
+    console.log(`✏️ updateQuestion: ${id}`);
 
     const question = await GameQuestion.findByPk(id);
     if (!question) {
-      console.log(`❌ Question not found: ${id}`);
       return res.status(404).json({ success: false, message: "Soal tidak ditemukan" });
     }
 
@@ -275,34 +248,25 @@ exports.updateQuestion = async (req, res) => {
     });
 
     console.log(`✅ Question UPDATED: ${id}`);
-    
-    const updatedQuestion = await GameQuestion.findByPk(id);
-    res.json({
-      success: true,
-      message: "Soal berhasil diupdate",
-      data: updatedQuestion
-    });
+    res.json({ success: true, message: "Soal berhasil diupdate" });
   } catch (err) {
     console.error("❌ ERROR updateQuestion:", err);
     res.status(500).json({ success: false, message: "Gagal update soal" });
   }
 };
 
-exports.deleteQuestion = async (req, res) => {
+const deleteQuestion = async (req, res) => {
   try {
     const { questionId } = req.params;
     console.log(`🗑️ deleteQuestion: ${questionId}`);
 
     const question = await GameQuestion.findByPk(questionId);
     if (!question) {
-      console.log(`❌ Question not found: ${questionId}`);
       return res.status(404).json({ success: false, message: "Soal tidak ditemukan" });
     }
 
-    const levelId = question.levelId;
     await question.destroy();
-
-    console.log(`✅ Question DELETED: ${questionId} from level ${levelId}`);
+    console.log(`✅ Question DELETED: ${questionId}`);
     res.json({ success: true, message: "Soal berhasil dihapus" });
   } catch (err) {
     console.error("❌ ERROR deleteQuestion:", err);
@@ -310,6 +274,7 @@ exports.deleteQuestion = async (req, res) => {
   }
 };
 
+// 🔥 EXPORTS DI SINI - SETELAH SEMUA FUNGSI DIDEFINISIKAN
 module.exports = {
   getMateri,
   getBadges,
