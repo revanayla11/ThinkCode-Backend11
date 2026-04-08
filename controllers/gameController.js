@@ -8,80 +8,91 @@ const Materi = require("../models/Materi");
 const gameController = {
   // 🔥 1. GET GAME MAP - FIXED variable order
   getGameMap: async (req, res) => {
-    try {
-      console.log("🗺️ getGameMap called for user:", req.user?.id || "guest");
+  try {
+    console.log("🗺️ getGameMap user:", req.user?.id);
 
-      // STEP 1: Get all levels FIRST
-      const allLevels = await GameLevel.findAll({
-        include: [{ 
-          model: Materi, 
-          attributes: ['id', 'title', 'slug'] 
-        }],
-        order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
-        attributes: ["id", "title", "levelNumber", "materi_id", "reward_xp", "gameType"]
-      });
+    // STEP 1-2: Levels (sama)
+    const allLevels = await GameLevel.findAll({
+      include: [{ model: Materi, attributes: ['id', 'title', 'slug'] }],
+      order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
+      attributes: ["id", "title", "levelNumber", "materi_id", "reward_xp", "gameType"]
+    });
 
-      // STEP 2: Group by materi
-      const materiMap = {};
-      allLevels.forEach(level => {
-        const materiId = level.materi_id;
-        const materi = level.Materi;
-        if (!materiMap[materiId]) {
-          materiMap[materiId] = {
-            materiId,
-            materiName: materi?.title || `Materi ${materiId}`,
-            slug: materi?.slug || '',
-            levels: []
-          };
-        }
-        materiMap[materiId].levels.push({
-          id: level.id,
-          title: level.title,
-          levelNumber: level.levelNumber,
-          reward_xp: level.reward_xp || 20,
-          gameType: level.gameType
-        });
-      });
-
-      // 🔥 NOW levels is SAFE!
-      const levels = Object.values(materiMap);
-
-      // STEP 3: User progress & stats
-      let progress = [];
-      let userStats = { xp: 0, streak: 0, hearts: 5 };
-
-      if (req.user) {
-        const user = await User.findByPk(req.user.id, { 
-          attributes: ["id", "xp", "hearts"] 
-        });
-        
-        progress = await UserProgress.findAll({
-          where: { userId: req.user.id },
-          attributes: ["levelId", "completed", "score", "xp"]
-        });
-
-        const completedCount = progress.filter(p => p.completed && p.score >= 80).length;
-        userStats = {
-          xp: user?.xp || 0,
-          hearts: user?.hearts || 5,
-          streak: completedCount
+    const materiMap = {};
+    allLevels.forEach(level => {
+      const materiId = level.materi_id;
+      const materi = level.Materi;
+      if (!materiMap[materiId]) {
+        materiMap[materiId] = {
+          materiId,
+          materiName: materi?.title || `Materi ${materiId}`,
+          slug: materi?.slug || '',
+          levels: []
         };
       }
+      materiMap[materiId].levels.push({
+        id: level.id,
+        title: level.title,
+        levelNumber: level.levelNumber,
+        reward_xp: level.reward_xp || 20,
+        gameType: level.gameType
+      });
+    });
+    const levels = Object.values(materiMap);
 
-      console.log(`✅ Map: ${levels.length} materi, ${progress.length} progress, ${userStats.streak} unlocked`);
+    // 🔥 FIXED: Progress format EXACTLY seperti frontend expect
+    let progress = [];
+    let userStats = { xp: 0, streak: 0, hearts: 5 };
 
-      res.json({ 
-        status: true, 
-        levels, 
-        progress, 
-        userStats 
+    if (req.user) {
+      const rawProgress = await UserProgress.findAll({
+        where: { 
+          userId: req.user.id,
+          levelId: { [Op.ne]: null }  // Filter null levelId
+        },
+        attributes: ["levelId", "completed", "score", "xp"],
+        order: [['createdAt', 'DESC']],
+        limit: 50
       });
 
-    } catch (err) {
-      console.error("❌ getGameMap ERROR:", err);
-      res.status(500).json({ status: false, message: err.message });
+      console.log("🗂️ Raw DB progress:", rawProgress.length, "records");
+
+      // 🔥 TRANSFORM ke format frontend
+      progress = rawProgress.map(p => {
+        const levelId = Number(p.levelId);
+        return {
+          levelId: levelId,           // ✅ Frontend expect ini
+          id: levelId,                // ✅ Backup
+          completed: p.completed === true || p.completed === 1,  // ✅ Boolean
+          score: Number(p.score) || 0, // ✅ Number
+          xp: Number(p.xp) || 0
+        };
+      }).filter(p => p.levelId > 0); // Filter invalid
+
+      console.log("📊 Formatted progress:", progress.length, "items");
+      console.log("📋 Sample:", progress.slice(0, 2));
     }
-  },
+
+    // Stats
+    const unlockedCount = progress.filter(p => p.completed && p.score >= 80).length;
+    userStats = {
+      xp: userStats.xp,
+      hearts: userStats.hearts,
+      streak: Math.min(unlockedCount, 7)
+    };
+
+    res.json({ 
+      status: true, 
+      levels, 
+      progress,  // 🔥 SEKARANG ADA DATA!
+      userStats 
+    });
+
+  } catch (err) {
+    console.error("❌ getGameMap ERROR:", err);
+    res.status(500).json({ status: false, message: err.message });
+  }
+},
 
   // 🔥 2. GET SINGLE LEVEL
   getLevel: async (req, res) => {
