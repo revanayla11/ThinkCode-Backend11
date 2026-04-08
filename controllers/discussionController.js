@@ -864,73 +864,224 @@ exports.debugRoom = async (req, res) => {
 };
 
 // Buat endpoint baru untuk template dinamis
+// 🔥 FULL DYNAMIC TEMPLATE - discussionController.js
 exports.getDynamicTemplate = async (req, res) => {
   try {
     const { materiId } = req.params;
+    const materiNum = parseInt(materiId);
     
-    // ✅ FALLBACK UNIVERSAL - SELALU BERHASIL
-    const universalTemplate = `DEKLARASI 
+    console.log(`📝 [MATERI ${materiNum}] Loading dynamic template...`);
+
+    let template = "";
+    let blanks = [];
+    let expectedFull = "";
+    let instructions = "";
+
+    // 🔥 DYNAMIC TEMPLATE BERDASARKAN MATERI
+    switch (materiNum) {
+      case 1: // ✅ IF SEDERHANA
+        template = `DEKLARASI
     ___BLANK_0___ : integer
 
-ALGORITMA 
+ALGORITMA
     read(___BLANK_1___)
     
-    IF (___BLANK_2___) THEN 
-        write("___BLANK_3___", ___BLANK_4___)
-    ENDIF 
+    IF (___BLANK_2___) THEN
+        write("___BLANK_3___", ___BLANK_4___, " adalah Positif")
+    ENDIF
 
 END`;
 
-    const universalBlanks = [
-      { id: 0, hint: "Nama variabel input", example: "angka" },
-      { id: 1, hint: "Variabel yang dibaca", example: "angka" },
-      { id: 2, hint: "Kondisi IF", example: "angka > 0" },
-      { id: 3, hint: "Pesan awal output", example: "Angka " },
-      { id: 4, hint: "Variabel di output", example: "angka" }
-    ];
+        blanks = [
+          { id: 0, hint: "Nama variabel", example: "angka" },
+          { id: 1, hint: "Variabel input", example: "angka" },
+          { id: 2, hint: "Kondisi IF", example: "angka > 0" },
+          { id: 3, hint: "Pesan awal", example: "Angka " },
+          { id: 4, hint: "Variabel output", example: "angka" }
+        ];
 
-    // Coba ambil dari DB (optional)
-    let officialAnswer = null;
-    try {
-      officialAnswer = await MateriAnswer.findOne({ where: { materiId } });
-    } catch (e) {
-      console.log("No official answer yet, using universal template");
-    }
-
-    res.json({
-      status: true,
-      data: {
-        template: universalTemplate,
-        blanks: universalBlanks,
-        expectedFull: `DEKLARASI 
+        expectedFull = `DEKLARASI
     angka : integer
 
-ALGORITMA 
+ALGORITMA
     read(angka)
     
-    IF (angka > 0) THEN 
-        write("Angka ", angka)
-    ENDIF 
+    IF (angka > 0) THEN
+        write("Angka ", angka, " adalah Positif")
+    ENDIF
 
-END`,
-        totalBlanks: 5,
-        hasOfficialAnswer: !!officialAnswer
-      }
-    });
-  } catch (error) {
-    // ✅ FAILSAFE - SELALU KASIH TEMPLATE
-    console.error("getDynamicTemplate error:", error);
-    res.json({
+END`;
+
+        instructions = "Isi 5 blank untuk program cek angka positif!";
+        break;
+
+      case 2: // ✅ IF-ELSE
+        template = `DEKLARASI
+    ___BLANK_0___ : integer
+
+ALGORITMA
+    read(___BLANK_1___)
+
+    IF (___BLANK_2___) THEN
+        write("Status: Lulus")
+    ___BLANK_3___
+        write("Status: Tidak Lulus")
+    ___BLANK_4___
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Nama variabel", example: "nilai" },
+          { id: 1, hint: "Variabel input", example: "nilai" },
+          { id: 2, hint: "Kondisi lulus (≥70)", example: "nilai >= 70" },
+          { id: 3, hint: "Keyword ELSE", example: "ELSE" },
+          { id: 4, hint: "Tutup struktur", example: "ENDIF" }
+        ];
+
+        expectedFull = `DEKLARASI
+    nilai : integer
+
+ALGORITMA
+    read(nilai)
+
+    IF (nilai >= 70) THEN
+        write("Status: Lulus")
+    ELSE
+        write("Status: Tidak Lulus")
+    ENDIF
+
+END`;
+
+        instructions = "Isi 5 blank untuk program pengecekan kelulusan!";
+        break;
+
+      case 3: // ✅ IF-ELSE IF-ELSE (MULTI KONDISI)
+        template = `DEKLARASI
+    ___BLANK_0___ : integer
+
+ALGORITMA
+    read(___BLANK_1___)
+
+    IF (___BLANK_2___) THEN
+        write("Kategori: Anak-anak")
+    ___BLANK_3___ (___BLANK_4___) THEN
+        write("Kategori: Remaja")
+    ___BLANK_5___ (___BLANK_6___) THEN
+        write("Kategori: Dewasa")
+    ___BLANK_7___
+        write("Kategori: Lansia")
+    ___BLANK_8___
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Nama variabel", example: "umur" },
+          { id: 1, hint: "Variabel input", example: "umur" },
+          { id: 2, hint: "Kondisi anak (≤12)", example: "umur <= 12" },
+          { id: 3, hint: "ELSE IF pertama", example: "ELSE IF" },
+          { id: 4, hint: "Kondisi remaja (≤17)", example: "umur <= 17" },
+          { id: 5, hint: "ELSE IF kedua", example: "ELSE IF" },
+          { id: 6, hint: "Kondisi dewasa (≤59)", example: "umur <= 59" },
+          { id: 7, hint: "Keyword ELSE", example: "ELSE" },
+          { id: 8, hint: "Tutup struktur", example: "ENDIF" }
+        ];
+
+        expectedFull = `DEKLARASI
+    umur : integer
+
+ALGORITMA
+    read(umur)
+
+    IF (umur <= 12) THEN
+        write("Kategori: Anak-anak")
+    ELSE IF (umur <= 17) THEN
+        write("Kategori: Remaja")
+    ELSE IF (umur <= 59) THEN
+        write("Kategori: Dewasa")
+    ELSE
+        write("Kategori: Lansia")
+    ENDIF
+
+END`;
+
+        instructions = "Isi 9 blank untuk klasifikasi umur lengkap!";
+        break;
+
+      default: // FALLBACK untuk materi lain
+        console.log(`⚠️ Unknown materi ${materiNum}, using Materi 1`);
+        // Gunakan template materi 1 sebagai fallback
+        template = `DEKLARASI
+    ___BLANK_0___ : integer
+
+ALGORITMA
+    read(___BLANK_1___)
+    
+    IF (___BLANK_2___) THEN
+        write("___BLANK_3___", ___BLANK_4___)
+    ENDIF
+
+END`;
+
+        blanks = [
+          { id: 0, hint: "Nama variabel", example: "angka" },
+          { id: 1, hint: "Variabel input", example: "angka" },
+          { id: 2, hint: "Kondisi", example: "angka > 0" },
+          { id: 3, hint: "Pesan", example: "Angka " },
+          { id: 4, hint: "Variabel output", example: "angka" }
+        ];
+
+        expectedFull = `DEKLARASI
+    angka : integer
+
+ALGORITMA
+    read(angka)
+    
+    IF (angka > 0) THEN
+        write("Angka ", angka)
+    ENDIF
+
+END`;
+
+        instructions = "Template default - cek materi ID!";
+    }
+
+    // 🔥 RESPONSE LENGKAP
+    const response = {
       status: true,
       data: {
-        template: `DEKLARASI 
+        materiId: materiNum,
+        template,
+        blanks,
+        expectedFull,
+        totalBlanks: blanks.length,
+        instructions,
+        blankCount: {
+          variabel: blanks.filter(b => b.hint.includes("variabel")).length,
+          kondisi: blanks.filter(b => b.hint.includes("kondisi")).length,
+          struktur: blanks.filter(b => b.hint.includes("ELSE") || b.hint.includes("ENDIF")).length
+        }
+      }
+    };
+
+    console.log(`✅ [MATERI ${materiNum}] Template OK: ${blanks.length} blanks`);
+    res.json(response);
+
+  } catch (error) {
+    console.error("❌ getDynamicTemplate ERROR:", error);
+    
+    // 🔥 FAILSAFE - SELALU KASIH TEMPLATE MATERI 1
+    res.json({
+      status: true, // ✅ JANGAN FALSE, BIAR FRONTEND TETEP JALAN
+      data: {
+        materiId: 1,
+        template: `DEKLARASI
 ___BLANK_0___ : integer
 
-ALGORITMA 
+ALGORITMA
 read(___BLANK_1___)
-IF (___BLANK_2___) THEN 
+IF (___BLANK_2___) THEN
 write("___BLANK_3___", ___BLANK_4___)
-ENDIF 
+ENDIF
 END`,
         blanks: [
           { id: 0, hint: "Nama variabel", example: "angka" },
@@ -939,7 +1090,17 @@ END`,
           { id: 3, hint: "Pesan", example: "Angka " },
           { id: 4, hint: "Variabel output", example: "angka" }
         ],
-        totalBlanks: 5
+        expectedFull: `DEKLARASI
+angka : integer
+
+ALGORITMA
+read(angka)
+IF (angka > 0) THEN
+write("Angka ", angka)
+ENDIF
+END`,
+        totalBlanks: 5,
+        instructions: "Emergency fallback template"
       }
     });
   }
