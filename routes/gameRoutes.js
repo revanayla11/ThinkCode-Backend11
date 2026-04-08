@@ -5,11 +5,11 @@ const verifyToken = require("../middleware/verifyToken");
 const gameController = require("../controllers/gameController");
 
 // PUBLIC
-router.get("/map", gameController.getGameMap);
-router.get("/level/:id", gameController.getLevel);
+router.get("/map", verifyToken, gameController.getGameMap);
+router.get("/level/:id",verifyToken, gameController.getLevel);
 
 // 🔥 FIXED: sesuain sama frontend
-router.post('/level/:id/submit', gameController.submitLevel);  // ← UDAH BENAR
+router.post('/level/:id/submit', verifyToken, gameController.submitLevel);  // ← UDAH BENAR
 router.get("/stats", verifyToken, gameController.getUserStats);
 
 module.exports = router;
