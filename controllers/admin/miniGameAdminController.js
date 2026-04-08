@@ -1,6 +1,7 @@
-const Materi = require("../models/Materi");
+const Materi = require("../../models/Materi");
 const GameLevel = require("../../models/GameLevel");
 const GameQuestion = require("../../models/GameQuestion");
+const Badge = require("../../models/Badge");
 
 // ================= MATERI =================
 exports.getMateri = async (req, res) => {
