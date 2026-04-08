@@ -175,7 +175,9 @@ const addQuestionBySlugLevel = async (req, res) => {
     const { slug, levelNumber } = req.params;
     const { type, content, meta } = req.body;
     
-    console.log(`➕ addQuestion: ${slug}/${levelNumber}, type=${type}`);
+    console.log(`➕ addQuestion: ${slug}/${levelNumber}`);
+    console.log("📥 RAW META:", meta);
+    console.log("📥 TYPE:", typeof meta);
 
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
@@ -190,48 +192,59 @@ const addQuestionBySlugLevel = async (req, res) => {
     });
 
     if (!level) {
-      console.log(`❌ Level not found for question: ${levelNumber}`);
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
+
+    // ✅ FIXED: Pastikan meta adalah object dan stringify dengan benar
+    const cleanMeta = typeof meta === 'object' ? meta : JSON.parse(JSON.stringify(meta));
+    
+    console.log("💾 SAVING META:", cleanMeta, typeof cleanMeta);
 
     const question = await GameQuestion.create({
       levelId: level.id,
       type: type || 'mcq',
       content: content || '',
-      meta: JSON.stringify(meta || {}),
+      meta: JSON.stringify(cleanMeta),
     });
 
-    console.log(`✅ Question CREATED: ID=${question.id}, levelId=${level.id}`);
+    console.log(`✅ Question CREATED: ID=${question.id}`);
     res.json({ success: true, data: question });
   } catch (err) {
     console.error("❌ ERROR addQuestionBySlugLevel:", err);
-    res.status(500).json({ success: false, message: "Gagal tambah soal" });
+    res.status(500).json({ success: false, message: "Gagal tambah soal", error: err.message });
   }
 };
 
+// 🔥 FIXED updateQuestion
 const updateQuestion = async (req, res) => {
   try {
     const { id } = req.params;
     const { content, type, meta } = req.body;
 
     console.log(`✏️ updateQuestion: ${id}`);
+    console.log("📥 UPDATE RAW META:", meta);
 
     const question = await GameQuestion.findByPk(id);
     if (!question) {
       return res.status(404).json({ success: false, message: "Soal tidak ditemukan" });
     }
 
+    // ✅ FIXED: Clean meta sebelum stringify
+    const cleanMeta = typeof meta === 'object' ? meta : JSON.parse(JSON.stringify(meta));
+
+    console.log("💾 UPDATING META:", cleanMeta);
+
     await question.update({
       content: content || question.content,
       type: type || question.type,
-      meta: JSON.stringify(meta || JSON.parse(question.meta || '{}')),
+      meta: JSON.stringify(cleanMeta),
     });
 
     console.log(`✅ Question UPDATED: ${id}`);
     res.json({ success: true, message: "Soal berhasil diupdate" });
   } catch (err) {
     console.error("❌ ERROR updateQuestion:", err);
-    res.status(500).json({ success: false, message: "Gagal update soal" });
+    res.status(500).json({ success: false, message: "Gagal update soal", error: err.message });
   }
 };
 
