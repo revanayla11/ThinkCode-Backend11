@@ -90,7 +90,7 @@ const startServer = async () => {
     // await models.sequelize.sync({ alter: true }); // ❌ HAPUS INI!
     
     // ✅ GUNAKAN KOSONG (hanya check models)
-    await models.sequelize.sync({}); 
+    //await models.sequelize.sync({}); 
     console.log("✅ Models loaded (no auto changes)");
 
     server.listen(PORT, "0.0.0.0", () => {
