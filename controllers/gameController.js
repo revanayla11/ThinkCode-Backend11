@@ -6,24 +6,19 @@ const User = require("../models/User");
 const Materi = require("../models/Materi");
 
 const gameController = {
-  // 1. GAME MAP - FIXED UNLOCK LOGIC 80%
+  // 🔥 FIXED getGameMap - Debug progress
   getGameMap: async (req, res) => {
     try {
       const allLevels = await GameLevel.findAll({
-        include: [{
-          model: Materi,
-          attributes: ['id', 'title', 'slug']
-        }],
+        include: [{ model: Materi, attributes: ['id', 'title', 'slug'] }],
         order: [["materi_id", "ASC"], ["levelNumber", "ASC"]],
         attributes: ["id", "title", "levelNumber", "materi_id", "reward_xp", "gameType"]
       });
 
-      // Group by materi
       const materiMap = {};
       allLevels.forEach(level => {
         const materiId = level.materi_id;
         const materi = level.Materi;
-        
         if (!materiMap[materiId]) {
           materiMap[materiId] = {
             materiId,
@@ -36,14 +31,12 @@ const gameController = {
           id: level.id,
           title: level.title,
           levelNumber: level.levelNumber,
-          reward_xp: level.reward_xp,
+          reward_xp: level.reward_xp || 20,
           gameType: level.gameType
         });
       });
 
       const levels = Object.values(materiMap);
-      
-      // 🔥 PROGRESS - HANYA YG >=80% DAN completed=true
       let progress = [];
       let userStats = { xp: 0, streak: 0, hearts: 5 };
 
@@ -52,14 +45,14 @@ const gameController = {
           attributes: ["id", "xp", "hearts"] 
         });
         
-        // 🔥 FIXED: Filter completed DAN score >=80
+        // 🔥 FIXED: score >= 80 (DB field = score)
         progress = await UserProgress.findAll({
           where: { 
             userId: req.user.id,
             completed: true,
-            score: { [Op.gte]: 80 }  // ← 80% MINIMUM!
+            score: { [Op.gte]: 80 }  // ← DB field 'score'
           },
-          attributes: ["levelId", "completed", "score", "xp"]
+          attributes: ["levelId", "completed", "score", "xp"]  // ← score dari DB!
         });
 
         userStats = {
@@ -69,7 +62,9 @@ const gameController = {
         };
       }
 
-      console.log(`✅ Map: ${levels.length} materi, ${progress.length} unlocked levels`);
+      console.log(`🗺️ Map: ${levels.length} materi, unlocked: ${progress.length}`);
+      console.log("🔍 Sample progress:", progress.slice(0, 3));
+
       res.json({ 
         status: true, 
         levels, 
@@ -139,20 +134,27 @@ const gameController = {
   },
 
   // 🔥 3. SUBMIT LEVEL - FIRST TIME XP + 80% UNLOCK + GURU REWARD!
-  submitLevel: async (req, res) => {
+    submitLevel: async (req, res) => {
     try {
       const userId = req.user.id;
       const levelId = req.params.id;
-      const { answers, scorePercent, heartsUsed = 1 } = req.body;
+      const { scorePercent, totalQuestions, correctAnswers, heartsUsed = 1 } = req.body;
 
-      console.log(`🎮 User ${userId} submit level ${levelId}, score: ${scorePercent}%`);
+      console.log(`🎮 Submit ${userId}: Level ${levelId} = ${scorePercent}%`);
+
+      if (!scorePercent || scorePercent > 100 || scorePercent < 0) {
+        return res.status(400).json({ 
+          status: false, 
+          message: `Invalid scorePercent: ${scorePercent}` 
+        });
+      }
 
       const level = await GameLevel.findByPk(levelId);
       if (!level) {
         return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
       }
 
-      // 🔥 CEK FIRST COMPLETION (belum pernah >=80%)
+      // 🔥 CEK FIRST COMPLETION >=80%
       const existingProgress = await UserProgress.findOne({
         where: {
           userId,
@@ -163,46 +165,34 @@ const gameController = {
       });
 
       const isFirstCompletion = !existingProgress;
-      const completed = scorePercent >= 80; // Unlock threshold
-      const perfectReward = level.reward_xp; // Yang ditentukan guru
-      
-      // 🔥 XP PROPORSIONAL: reward_xp * (score/100)
+      const completed = scorePercent >= 80;
+      const perfectReward = level.reward_xp || 20;
       const rewardXp = isFirstCompletion 
         ? Math.round(perfectReward * (scorePercent / 100))
         : 0;
 
-      // 1. UPSERT PROGRESS
+      console.log(`📊 Level ${level.levelNumber}: 
+        ${completed ? '✅' : '❌'} ${scorePercent}% | 
+        ${isFirstCompletion ? `+${rewardXp}XP` : 'No XP'} | 
+        Perfect: ${perfectReward}XP`);
+
+      // 🔥 UPSERT - scorePercent → score (DB field)
       await UserProgress.upsert({
         userId,
         levelId,
         xp: rewardXp,
         stars: completed ? 3 : Math.floor(scorePercent / 30),
         completed,
-        score: scorePercent  // ← Simpan score buat unlock logic
+        score: scorePercent  // ← scorePercent disimpan ke 'score'
       });
 
-      // 2. UPDATE USER XP & HEARTS
+      // Update user XP + hearts
       const user = await User.findByPk(userId);
-      if (!user) {
-        return res.status(404).json({ status: false, message: "User tidak ditemukan" });
-      }
-
-      let oldXp = user.xp || 0;
       if (rewardXp > 0) {
-        user.xp = oldXp + rewardXp;
-        oldXp = user.xp;
+        user.xp += rewardXp;
       }
-
-      // Kurangi hearts
       user.hearts = Math.max(0, (user.hearts || 5) - heartsUsed);
-      
       await user.save();
-
-      console.log(`✅ ${isFirstCompletion ? '' : 'REPLAY'} User ${userId}: 
-        Level ${level.levelNumber} | Score ${scorePercent}% | 
-        ${completed ? 'UNLOCKED' : 'NOT UNLOCKED'} | 
-        XP ${rewardXp > 0 ? `+${rewardXp}` : 'NO XP'} | 
-        Hearts ${user.hearts}`);
 
       res.json({
         status: true,
@@ -213,12 +203,9 @@ const gameController = {
         completed,
         isFirstCompletion,
         perfectReward,
-        message: completed && isFirstCompletion 
-          ? `Level unlocked! +${rewardXp} XP 🎉` 
-          : isFirstCompletion 
-          ? `+${rewardXp} XP! Coba lagi buat unlock (80%+)`
-          : "Nice replay! No XP lagi 😎"
+        message: completed ? "Level unlocked! 🎉" : "Target 80%+ untuk unlock!"
       });
+
     } catch (err) {
       console.error("❌ submitLevel:", err);
       res.status(500).json({ status: false, message: err.message });
