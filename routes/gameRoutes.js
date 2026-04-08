@@ -9,7 +9,7 @@ router.get("/map", gameController.getGameMap);
 router.get("/level/:id", gameController.getLevel);
 
 // 🔥 FIXED: sesuain sama frontend
-router.post("/submit/:id", verifyToken, gameController.submitLevel);  // ← UDAH BENAR
+router.post('/level/:id/submit', gameController.submitLevel);  // ← UDAH BENAR
 router.get("/stats", verifyToken, gameController.getUserStats);
 
 module.exports = router;
