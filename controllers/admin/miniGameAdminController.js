@@ -17,37 +17,21 @@ exports.getBadges = async (req, res) => {
 
 
 // ==================== MATERI ====================
-exports.getMateri = async (req, res) => {
-  try {
-    const materi = await Materi.findAll({
-      attributes: ["id", "title", "slug"],
-      order: [["order", "ASC"]],
-    });
-
-    res.json({ success: true, data: materi });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
-  }
-};
-
-
-// ==================== LEVEL ====================
 exports.getLevelsByMateri = async (req, res) => {
   try {
     const { slug } = req.params;
-
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      return res.status(404).json({
-        success: false,
-        message: "Materi tidak ditemukan",
-      });
+      return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
     const levels = await GameLevel.findAll({
       where: { materi_id: materi.id },
       order: [["levelNumber", "ASC"]],
+      attributes: [
+        'id', 'title', 'levelNumber', 'totalQuestions', 'reward_xp', 
+        'gameType', 'reward_badge_id'  // 🔥 PASTIKAN gameType INCLUDE
+      ], 
       include: [
         {
           model: Badge,
@@ -60,24 +44,19 @@ exports.getLevelsByMateri = async (req, res) => {
     res.json({ success: true, data: levels });
   } catch (err) {
     console.error("ERROR getLevels:", err);
-    res.status(500).json({
-      success: false,
-      message: "Gagal ambil level",
-    });
+    res.status(500).json({ success: false, message: "Gagal ambil level" });
   }
 };
 
 
+// controllers/admin/miniGameAdminController.js
+
 exports.addLevel = async (req, res) => {
   try {
     const { slug } = req.params;
-
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      return res.status(404).json({
-        success: false,
-        message: "Materi tidak ditemukan",
-      });
+      return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
     const level = await GameLevel.create({
@@ -85,6 +64,7 @@ exports.addLevel = async (req, res) => {
       levelNumber: req.body.levelNumber,
       totalQuestions: req.body.totalQuestions,
       reward_xp: req.body.reward_xp,
+      gameType: req.body.gameType,  // 🔥 WAJIB TAMBAH INI
       reward_badge_id: req.body.reward_badge_id || null,
       materi_id: materi.id,
     });
@@ -92,24 +72,16 @@ exports.addLevel = async (req, res) => {
     res.json({ success: true, data: level });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      success: false,
-      message: "Gagal tambah level",
-    });
+    res.status(500).json({ success: false, message: "Gagal tambah level" });
   }
 };
-
 
 exports.updateLevel = async (req, res) => {
   try {
     const { levelId } = req.params;
-
     const level = await GameLevel.findByPk(levelId);
     if (!level) {
-      return res.status(404).json({
-        success: false,
-        message: "Level tidak ditemukan",
-      });
+      return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
     await level.update({
@@ -117,20 +89,14 @@ exports.updateLevel = async (req, res) => {
       levelNumber: req.body.levelNumber,
       totalQuestions: req.body.totalQuestions,
       reward_xp: req.body.reward_xp,
+      gameType: req.body.gameType,  // 🔥 WAJIB TAMBAH INI
       reward_badge_id: req.body.reward_badge_id || null,
     });
 
-    res.json({
-      success: true,
-      message: "Level berhasil diupdate",
-      data: level,
-    });
+    res.json({ success: true, message: "Level berhasil diupdate", data: level });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      success: false,
-      message: "Gagal update level",
-    });
+    res.status(500).json({ success: false, message: "Gagal update level" });
   }
 };
 
