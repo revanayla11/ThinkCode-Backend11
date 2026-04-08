@@ -124,7 +124,6 @@ const deleteLevel = async (req, res) => {
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
-    // Hapus questions terkait
     await GameQuestion.destroy({ where: { levelId: level.id } });
     await level.destroy();
 
@@ -137,7 +136,6 @@ const deleteLevel = async (req, res) => {
 };
 
 // ==================== LEVEL + QUESTION ====================
-// 🔥 ULTRA SAFE - getLevelWithQuestions
 const getLevelWithQuestions = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
@@ -145,7 +143,6 @@ const getLevelWithQuestions = async (req, res) => {
 
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      console.log("❌ Materi NOT FOUND");
       return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
@@ -157,7 +154,6 @@ const getLevelWithQuestions = async (req, res) => {
     });
 
     if (!level) {
-      console.log("❌ Level NOT FOUND");
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
@@ -168,16 +164,14 @@ const getLevelWithQuestions = async (req, res) => {
 
     console.log(`✅ SUCCESS: ${questions.length} questions for level ${level.id}`);
 
-    // 🔥 EXACTLY MATCH FRONTEND EXPECTATION
     const response = {
       success: true,
       data: {
-        level: level.toJSON(),  // ✅ Convert to plain object
-        questions: questions.map(q => q.toJSON())  // ✅ Convert to plain objects
+        level: level.toJSON(),
+        questions: questions.map(q => q.toJSON())
       }
     };
     
-    console.log("📤 SENDING:", JSON.stringify(response, null, 2));
     res.json(response);
     
   } catch (err) {
@@ -190,7 +184,7 @@ const getLevelWithQuestions = async (req, res) => {
   }
 };
 
-// ==================== QUESTION CRUD ====================
+// ==================== 🔥 FIXED QUESTION CRUD ====================
 const addQuestionBySlugLevel = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
@@ -198,7 +192,6 @@ const addQuestionBySlugLevel = async (req, res) => {
     
     console.log(`➕ addQuestion: ${slug}/${levelNumber}`);
     console.log("📥 RAW META:", meta);
-    console.log("📥 TYPE:", typeof meta);
 
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
@@ -216,10 +209,21 @@ const addQuestionBySlugLevel = async (req, res) => {
       return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
     }
 
-    // ✅ FIXED: Pastikan meta adalah object dan stringify dengan benar
-    const cleanMeta = typeof meta === 'object' ? meta : JSON.parse(JSON.stringify(meta));
-    
-    console.log("💾 SAVING META:", cleanMeta, typeof cleanMeta);
+    // 🔥 FIXED: Clean & validate meta
+    let cleanMeta = {};
+    try {
+      cleanMeta = typeof meta === 'object' ? meta : JSON.parse(meta || '{}');
+    } catch (e) {
+      cleanMeta = {};
+    }
+
+    // 🔥 ULTRA FIXED: True/False handling
+    if (type === 'truefalse') {
+      cleanMeta.answer = cleanMeta.answer?.toString() || 'false';
+      cleanMeta.statement = cleanMeta.statement || content;
+    }
+
+    console.log("💾 SAVING META:", cleanMeta);
 
     const question = await GameQuestion.create({
       levelId: level.id,
@@ -236,8 +240,6 @@ const addQuestionBySlugLevel = async (req, res) => {
   }
 };
 
-// 🔥 FIXED updateQuestion
-// 🔥 FIXED updateQuestion
 const updateQuestion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -251,8 +253,19 @@ const updateQuestion = async (req, res) => {
       return res.status(404).json({ success: false, message: "Soal tidak ditemukan" });
     }
 
-    // ✅ FIXED: Clean meta sebelum stringify
-    const cleanMeta = typeof meta === 'object' ? meta : JSON.parse(JSON.stringify(meta));
+    // 🔥 FIXED: Clean & validate meta
+    let cleanMeta = {};
+    try {
+      cleanMeta = typeof meta === 'object' ? meta : JSON.parse(meta || '{}');
+    } catch (e) {
+      cleanMeta = {};
+    }
+
+    // 🔥 ULTRA FIXED: True/False handling
+    if (type === 'truefalse') {
+      cleanMeta.answer = cleanMeta.answer?.toString() || 'false';
+      cleanMeta.statement = cleanMeta.statement || content;
+    }
 
     console.log("💾 UPDATING META:", cleanMeta);
 
@@ -263,7 +276,7 @@ const updateQuestion = async (req, res) => {
     });
 
     console.log(`✅ Question UPDATED: ${id}`);
-    res.json({ success: true, message: "Soal berhasil diupdate" });
+    res.json({ success: true, message: "Soal berhasil diupdate", data: question });
   } catch (err) {
     console.error("❌ ERROR updateQuestion:", err);
     res.status(500).json({ success: false, message: "Gagal update soal", error: err.message });
@@ -289,7 +302,6 @@ const deleteQuestion = async (req, res) => {
   }
 };
 
-// 🔥 EXPORTS
 module.exports = {
   getMateri,
   getBadges,
