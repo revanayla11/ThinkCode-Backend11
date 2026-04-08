@@ -12,7 +12,5 @@ router.get("/level/:id", gameController.getLevel);
 router.post("/submit/:id", verifyToken, gameController.submitLevel);
 router.get("/stats", verifyToken, gameController.getUserStats);
 
-// GET /admin/minigame/:slug/levels/:levelNumber
-router.get('/:slug/levels/:levelNumber', controller.getLevelWithQuestions);
 
 module.exports = router;
