@@ -35,17 +35,14 @@ const getBadges = async (req, res) => {
 const getLevelsByMateri = async (req, res) => {
   try {
     const { slug } = req.params;
-    console.log(`🔍 getLevelsByMateri: slug=${slug}`);
-
     const materi = await Materi.findOne({ where: { slug } });
     if (!materi) {
-      console.log(`❌ Materi not found: ${slug}`);
       return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
     }
 
     const levels = await GameLevel.findAll({
       where: { materi_id: materi.id },
-      order: [["levelNumber", "ASC"]],
+      order: [["levelNumber", "ASC"]],  // ← OK, GameLevel punya levelNumber
       attributes: ['id', 'title', 'levelNumber', 'totalQuestions', 'reward_xp', 'gameType', 'reward_badge_id'],
       include: [{
         model: Badge,
@@ -55,7 +52,6 @@ const getLevelsByMateri = async (req, res) => {
       }],
     });
 
-    console.log(`✅ Found ${levels.length} levels for materi ${materi.id}`);
     res.json({ success: true, data: levels });
   } catch (err) {
     console.error("❌ ERROR getLevelsByMateri:", err);
@@ -141,50 +137,34 @@ const deleteLevel = async (req, res) => {
 };
 
 // ==================== LEVEL + QUESTION ====================
+
 const getLevelWithQuestions = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
     console.log(`🔍 getLevelWithQuestions: ${slug}/${levelNumber}`);
 
     const materi = await Materi.findOne({ where: { slug } });
-    if (!materi) {
-      return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
-    }
+    if (!materi) return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
 
     const level = await GameLevel.findOne({
       where: {
         materi_id: materi.id,
         levelNumber: parseInt(levelNumber),
       },
-      include: [{
-        model: Badge,
-        as: 'Badge',
-        attributes: ["id", "badge_name", "image"],
-        required: false,
-      }],
     });
 
-    if (!level) {
-      console.log(`❌ Level not found: materi_id=${materi.id}, levelNumber=${levelNumber}`);
-      return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
-    }
+    if (!level) return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
 
+    // 🔥 ORDER BY id bukan createdAt
     const questions = await GameQuestion.findAll({
       where: { levelId: level.id },
-      order: [["createdAt", "ASC"]]
+      order: [["id", "ASC"]]  // ← FIX INI!
     });
 
-    console.log(`✅ Found ${questions.length} questions for level ${level.id}`);
-    
-    res.json({
-      success: true,
-      data: {
-        level,
-        questions,
-      },
-    });
+    console.log(`✅ ${questions.length} questions loaded!`);
+    res.json({ success: true, data: { level, questions } });
   } catch (err) {
-    console.error("❌ ERROR getLevelWithQuestions:", err);
+    console.error("❌ ERROR:", err.message);
     res.status(500).json({ success: false, message: "Gagal ambil soal" });
   }
 };
