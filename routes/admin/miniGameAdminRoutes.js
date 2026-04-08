@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const verifyToken = require("../../middleware/verifyToken");
 const isAdmin = require("../../middleware/isAdmin");
-const ctrl = require("../controllers/admin/adminMiniGameController");
+const ctrl = require("../controllers/admin/MiniGameAdminController");
 
 router.get("/materi", verifyToken, isAdmin, ctrl.getMateri);
 
