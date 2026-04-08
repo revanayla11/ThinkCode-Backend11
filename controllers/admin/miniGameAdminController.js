@@ -42,7 +42,7 @@ const getLevelsByMateri = async (req, res) => {
 
     const levels = await GameLevel.findAll({
       where: { materi_id: materi.id },
-      order: [["levelNumber", "ASC"]],  // ← OK, GameLevel punya levelNumber
+      order: [["levelNumber", "ASC"]],
       attributes: ['id', 'title', 'levelNumber', 'totalQuestions', 'reward_xp', 'gameType', 'reward_badge_id'],
       include: [{
         model: Badge,
@@ -137,7 +137,7 @@ const deleteLevel = async (req, res) => {
 };
 
 // ==================== LEVEL + QUESTION ====================
-
+// 🔥 FIXED: getLevelWithQuestions - structure konsisten
 const getLevelWithQuestions = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
@@ -155,14 +155,21 @@ const getLevelWithQuestions = async (req, res) => {
 
     if (!level) return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
 
-    // 🔥 ORDER BY id bukan createdAt
     const questions = await GameQuestion.findAll({
       where: { levelId: level.id },
-      order: [["id", "ASC"]]  // ← FIX INI!
+      order: [["id", "ASC"]]
     });
 
     console.log(`✅ ${questions.length} questions loaded!`);
-    res.json({ success: true, data: { level, questions } });
+    
+    // ✅ FIXED: Structure { success: true, data: { level, questions } }
+    res.json({ 
+      success: true, 
+      data: { 
+        level: level, 
+        questions: questions 
+      } 
+    });
   } catch (err) {
     console.error("❌ ERROR:", err.message);
     res.status(500).json({ success: false, message: "Gagal ambil soal" });
@@ -216,6 +223,7 @@ const addQuestionBySlugLevel = async (req, res) => {
 };
 
 // 🔥 FIXED updateQuestion
+// 🔥 FIXED updateQuestion
 const updateQuestion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -267,7 +275,7 @@ const deleteQuestion = async (req, res) => {
   }
 };
 
-// 🔥 EXPORTS DI SINI - SETELAH SEMUA FUNGSI DIDEFINISIKAN
+// 🔥 EXPORTS
 module.exports = {
   getMateri,
   getBadges,
