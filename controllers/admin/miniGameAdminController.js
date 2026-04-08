@@ -137,14 +137,17 @@ const deleteLevel = async (req, res) => {
 };
 
 // ==================== LEVEL + QUESTION ====================
-// 🔥 FIXED: getLevelWithQuestions - structure konsisten
+// 🔥 ULTRA SAFE - getLevelWithQuestions
 const getLevelWithQuestions = async (req, res) => {
   try {
     const { slug, levelNumber } = req.params;
     console.log(`🔍 getLevelWithQuestions: ${slug}/${levelNumber}`);
 
     const materi = await Materi.findOne({ where: { slug } });
-    if (!materi) return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
+    if (!materi) {
+      console.log("❌ Materi NOT FOUND");
+      return res.status(404).json({ success: false, message: "Materi tidak ditemukan" });
+    }
 
     const level = await GameLevel.findOne({
       where: {
@@ -153,26 +156,37 @@ const getLevelWithQuestions = async (req, res) => {
       },
     });
 
-    if (!level) return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
+    if (!level) {
+      console.log("❌ Level NOT FOUND");
+      return res.status(404).json({ success: false, message: "Level tidak ditemukan" });
+    }
 
     const questions = await GameQuestion.findAll({
       where: { levelId: level.id },
       order: [["id", "ASC"]]
     });
 
-    console.log(`✅ ${questions.length} questions loaded!`);
+    console.log(`✅ SUCCESS: ${questions.length} questions for level ${level.id}`);
+
+    // 🔥 EXACTLY MATCH FRONTEND EXPECTATION
+    const response = {
+      success: true,
+      data: {
+        level: level.toJSON(),  // ✅ Convert to plain object
+        questions: questions.map(q => q.toJSON())  // ✅ Convert to plain objects
+      }
+    };
     
-    // ✅ FIXED: Structure { success: true, data: { level, questions } }
-    res.json({ 
-      success: true, 
-      data: { 
-        level: level, 
-        questions: questions 
-      } 
-    });
+    console.log("📤 SENDING:", JSON.stringify(response, null, 2));
+    res.json(response);
+    
   } catch (err) {
-    console.error("❌ ERROR:", err.message);
-    res.status(500).json({ success: false, message: "Gagal ambil soal" });
+    console.error("❌ FULL ERROR:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Gagal ambil soal",
+      error: err.message 
+    });
   }
 };
 
