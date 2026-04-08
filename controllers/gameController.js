@@ -6,7 +6,7 @@ const User = require("../models/User");
 const Materi = require("../models/Materi");
 
 const gameController = {
-  // 🔥 1. GET GAME MAP - MAIN ENDPOINT
+  // 🔥 1. GET GAME MAP - FIXED NO updatedAt ORDER
   getGameMap: async (req, res) => {
     try {
       console.log("🗺️ getGameMap - user:", req.user?.id);
@@ -46,12 +46,18 @@ const gameController = {
       let progress = [];
       let userStats = { xp: 0, streak: 0, hearts: 5 };
 
-      if (req.user) {
-        const user = await User.findByPk(req.user.id, { attributes: ["xp", "hearts"] });
+      if (req.user?.id) {
+        const userId = req.user.id;
+        console.log("👤 Loading progress for user:", userId);
+        
+        const user = await User.findByPk(userId, { attributes: ["xp", "hearts"] });
+        // 🔥 FIXED: HAPUS order: [["updatedAt", "DESC"]]
         const rawProgress = await UserProgress.findAll({
-          where: { userId: req.user.id, levelId: { [Op.ne]: null } },
-          attributes: ["levelId", "completed", "score", "xp"],
-          order: [["updatedAt", "DESC"]]
+          where: { 
+            userId: userId, 
+            levelId: { [Op.ne]: null } 
+          },
+          attributes: ["levelId", "completed", "score", "xp"]
         });
 
         progress = rawProgress.map(p => ({
@@ -69,13 +75,7 @@ const gameController = {
         };
       }
 
-      // 🔥 DEBUG LOG
-      console.log(`✅ Map sent: ${levels.length} materi, ${progress.length} progress items`);
-      console.log("🔍 Sample data:", {
-        firstMateriLevels: levels[0]?.levels?.map(l => l.id),
-        recentProgress: progress.slice(0, 3).map(p => ({ levelId: p.levelId, completed: p.completed }))
-      });
-
+      console.log(`✅ Map sent: ${levels.length} materi, ${progress.length} progress, user: ${req.user?.id}`);
       res.json({ status: true, levels, progress, userStats });
 
     } catch (err) {
@@ -88,6 +88,8 @@ const gameController = {
   getLevel: async (req, res) => {
     try {
       const levelId = req.params.id;
+      console.log("🎮 getLevel:", levelId, "user:", req.user?.id);
+      
       const level = await GameLevel.findByPk(levelId, {
         include: [{ model: Materi, attributes: ["title"] }]
       });
@@ -137,30 +139,22 @@ const gameController = {
     }
   },
 
-  // 🔥 3. SUBMIT LEVEL - SELALU SIMPAN PROGRESS (UNLOCK NEXT!)
- submitLevel: async (req, res) => {
-  try {
-    // 🔥 DEBUG LOGS
-    console.log("🔍 FULL REQ:", {
-      user: req.user,
-      userId: req.user?.id,
-      params: req.params,
-      body: req.body
-    });
-    
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ 
-        status: false, 
-        message: 'req.user.id undefined. Check token!' 
-      });
-    }
+  // 🔥 3. SUBMIT LEVEL - FIXED SAFE USER
+  submitLevel: async (req, res) => {
+    try {
+      console.log("🔍 submitLevel - user:", req.user?.id);
+      
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ status: false, message: 'Login required' });
+      }
+      
       const levelId = Number(req.params.id);
       const { scorePercent, totalQuestions = 0, correctAnswers = 0, heartsUsed = 1 } = req.body;
 
       console.log(`🎮 Submit: U${userId} L${levelId} = ${scorePercent}% (${heartsUsed} hearts)`);
 
-            if (!Number.isFinite(scorePercent) || scorePercent > 100 || scorePercent < 0) {
+      if (!Number.isFinite(scorePercent) || scorePercent > 100 || scorePercent < 0) {
         return res.status(400).json({ status: false, message: "Invalid score" });
       }
 
@@ -172,8 +166,8 @@ const gameController = {
       const completed = scorePercent >= 80;
       const rewardXp = completed ? (level.reward_xp || 20) : 0;
 
-      // 🔥 CRITICAL: SELALU SIMPAN PROGRESS - INI YANG UNLOCK LEVEL SELANJUTNYA!
-      const [savedProgress, created] = await UserProgress.upsert({
+      // 🔥 SELALU SIMPAN PROGRESS
+      await UserProgress.upsert({
         userId,
         levelId,
         completed,
@@ -181,31 +175,16 @@ const gameController = {
         xp: rewardXp,
         stars: Math.floor(scorePercent / 33),
         totalQuestions,
-        correctAnswers,
-        updatedAt: new Date()
+        correctAnswers
       });
 
-      console.log(`💾 Progress ${created ? 'CREATED' : 'UPDATED'}: L${levelId} completed=${completed}`);
-
-      // Update user XP & hearts
+      // Update user
       const user = await User.findByPk(userId);
-      if (rewardXp > 0) {
-        user.xp = (user.xp || 0) + rewardXp;
-      }
+      if (rewardXp > 0) user.xp += rewardXp;
       user.hearts = Math.max(0, Math.min(5, (user.hearts || 5) - heartsUsed));
       await user.save();
 
-      // 🔥 DEBUG: Verify saved data
-      const verifyProgress = await UserProgress.findOne({ 
-        where: { userId, levelId } 
-      });
-      console.log(`✅ VERIFIED: L${levelId} saved:`, {
-        levelId: verifyProgress.levelId,
-        completed: verifyProgress.completed,
-        score: verifyProgress.score
-      });
-
-      console.log(`🎉 User U${userId}: XP=${user.xp}, Hearts=${user.hearts}`);
+      console.log(`✅ Saved: U${userId} L${levelId} ${completed ? '✅' : '❌'} ${scorePercent}%`);
 
       res.json({
         status: true,
@@ -228,10 +207,14 @@ const gameController = {
   // 🔥 4. USER STATS
   getUserStats: async (req, res) => {
     try {
-      const user = await User.findByPk(req.user.id, { attributes: ["xp", "hearts"] });
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ status: false, message: 'Login required' });
+      }
+      
+      const user = await User.findByPk(userId, { attributes: ["xp", "hearts"] });
       const progress = await UserProgress.findAll({
-        where: { userId: req.user.id, completed: true },
-        attributes: ["levelId"]
+        where: { userId, completed: true }
       });
 
       res.json({

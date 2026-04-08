@@ -19,7 +19,16 @@ const UserProgress = sequelize.define("UserProgress", {
     type: DataTypes.INTEGER, 
     defaultValue: 0,
     validate: { min: 0, max: 100 }  // ← BARU! Buat unlock logic
-  }
+  },
+      createdAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+      onUpdate: DataTypes.NOW
+    }
 }, {
   tableName: "user_progress",
   timestamps: false,
