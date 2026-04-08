@@ -31,13 +31,13 @@ app.use("/api/materi", require("./routes/materiRoutes"));
 app.use("/api/leaderboard", require("./routes/leaderboardRoutes"));
 app.use("/api/achievement", require("./routes/achievementRoutes"));
 app.use("/api/game", require("./routes/gameRoutes"));
-app.use("/api/discussion", require("./routes/discussionRoutes"));  // ✅ Discussion
+app.use("/api/discussion", require("./routes/discussionRoutes"));
 app.use("/api/upload", require("./routes/uploadRoutes"));
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/badges", require("./routes/badgeRoutes")); 
 app.use("/api/profile", require("./routes/profileRoutes"));
-app.use("/api/video", require("./routes/videoRoutes"));           // ✅ Video
-app.use("/api/feedback", require("./routes/feedback"));          // ✅ Feedback
+app.use("/api/video", require("./routes/videoRoutes"));
+app.use("/api/feedback", require("./routes/feedback"));
 
 // ✅ ADMIN ROUTES
 app.use("/api/admin/users", require("./routes/admin/userAdminRoutes"));
@@ -86,8 +86,12 @@ const startServer = async () => {
     await models.sequelize.authenticate(); 
     console.log("✅ Database connected");
 
-    await models.sequelize.sync({ alter: true });
-    console.log("✅ Models synced");
+    // 🔥 FIXED: HAPUS AUTO-SYNC (penyebab error!)
+    // await models.sequelize.sync({ alter: true }); // ❌ HAPUS INI!
+    
+    // ✅ GUNAKAN KOSONG (hanya check models)
+    await models.sequelize.sync({}); 
+    console.log("✅ Models loaded (no auto changes)");
 
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
