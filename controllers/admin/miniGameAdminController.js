@@ -3,6 +3,18 @@ const GameLevel = require("../../models/GameLevel");
 const GameQuestion = require("../../models/GameQuestion");
 const Badge = require("../../models/Badge");
 
+// ==================== MATERI ====================
+exports.getMateri = async (req, res) => {
+  try {
+    const materiList = await Materi.findAll({
+      order: [["createdAt", "DESC"]]
+    });
+    res.json({ success: true, data: materiList });
+  } catch (err) {
+    console.error("ERROR getMateri:", err);
+    res.status(500).json({ success: false, message: "Gagal ambil materi" });
+  }
+};
 
 // ==================== BADGE ====================
 exports.getBadges = async (req, res) => {
@@ -15,8 +27,7 @@ exports.getBadges = async (req, res) => {
   }
 };
 
-
-// ==================== MATERI ====================
+// ==================== LEVEL ====================
 exports.getLevelsByMateri = async (req, res) => {
   try {
     const { slug } = req.params;
@@ -30,7 +41,7 @@ exports.getLevelsByMateri = async (req, res) => {
       order: [["levelNumber", "ASC"]],
       attributes: [
         'id', 'title', 'levelNumber', 'totalQuestions', 'reward_xp', 
-        'gameType', 'reward_badge_id'  // 🔥 PASTIKAN gameType INCLUDE
+        'gameType', 'reward_badge_id'
       ], 
       include: [
         {
@@ -48,9 +59,6 @@ exports.getLevelsByMateri = async (req, res) => {
   }
 };
 
-
-// controllers/admin/miniGameAdminController.js
-
 exports.addLevel = async (req, res) => {
   try {
     const { slug } = req.params;
@@ -64,7 +72,7 @@ exports.addLevel = async (req, res) => {
       levelNumber: req.body.levelNumber,
       totalQuestions: req.body.totalQuestions,
       reward_xp: req.body.reward_xp,
-      gameType: req.body.gameType,  // 🔥 WAJIB TAMBAH INI
+      gameType: req.body.gameType,
       reward_badge_id: req.body.reward_badge_id || null,
       materi_id: materi.id,
     });
@@ -89,17 +97,20 @@ exports.updateLevel = async (req, res) => {
       levelNumber: req.body.levelNumber,
       totalQuestions: req.body.totalQuestions,
       reward_xp: req.body.reward_xp,
-      gameType: req.body.gameType,  // 🔥 WAJIB TAMBAH INI
+      gameType: req.body.gameType,
       reward_badge_id: req.body.reward_badge_id || null,
     });
 
-    res.json({ success: true, message: "Level berhasil diupdate", data: level });
+    const updatedLevel = await GameLevel.findByPk(levelId, {
+      include: [{ model: Badge, attributes: ["id", "badge_name", "image"] }]
+    });
+
+    res.json({ success: true, message: "Level berhasil diupdate", data: updatedLevel });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Gagal update level" });
   }
 };
-
 
 exports.deleteLevel = async (req, res) => {
   try {
@@ -128,7 +139,6 @@ exports.deleteLevel = async (req, res) => {
   }
 };
 
-
 // ==================== LEVEL + QUESTION ====================
 exports.getLevelWithQuestions = async (req, res) => {
   try {
@@ -145,8 +155,15 @@ exports.getLevelWithQuestions = async (req, res) => {
     const level = await GameLevel.findOne({
       where: {
         materi_id: materi.id,
-        levelNumber,
+        levelNumber: parseInt(levelNumber),
       },
+      include: [
+        {
+          model: Badge,
+          attributes: ["id", "badge_name", "image"],
+          required: false,
+        },
+      ],
     });
 
     if (!level) {
@@ -158,6 +175,7 @@ exports.getLevelWithQuestions = async (req, res) => {
 
     const questions = await GameQuestion.findAll({
       where: { levelId: level.id },
+      order: [["createdAt", "ASC"]]
     });
 
     res.json({
@@ -176,7 +194,6 @@ exports.getLevelWithQuestions = async (req, res) => {
   }
 };
 
-
 // ==================== QUESTION ====================
 exports.addQuestionBySlugLevel = async (req, res) => {
   try {
@@ -194,7 +211,7 @@ exports.addQuestionBySlugLevel = async (req, res) => {
     const level = await GameLevel.findOne({
       where: {
         materi_id: materi.id,
-        levelNumber,
+        levelNumber: parseInt(levelNumber),
       },
     });
 
@@ -225,7 +242,6 @@ exports.addQuestionBySlugLevel = async (req, res) => {
   }
 };
 
-
 exports.updateQuestion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -245,9 +261,11 @@ exports.updateQuestion = async (req, res) => {
       meta: JSON.stringify(meta || {}),
     });
 
+    const updatedQuestion = await GameQuestion.findByPk(id);
     res.json({
       success: true,
       message: "Soal berhasil diupdate",
+      data: updatedQuestion
     });
   } catch (err) {
     console.error(err);
@@ -257,7 +275,6 @@ exports.updateQuestion = async (req, res) => {
     });
   }
 };
-
 
 exports.deleteQuestion = async (req, res) => {
   try {
