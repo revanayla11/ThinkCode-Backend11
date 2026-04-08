@@ -1,17 +1,15 @@
+// routes/game.js
 const express = require("express");
 const router = express.Router();
 const verifyToken = require("../middleware/verifyToken");
 const gameController = require("../controllers/gameController");
 
-// PUBLIC ROUTES
+// PUBLIC - Siapa saja bisa main map
 router.get("/map", gameController.getGameMap);
-router.get("/levels", gameController.getGameMap);  // ← INI BARU!
 router.get("/level/:id", gameController.getLevel);
-router.get("/leaderboard", gameController.getLeaderboard);
 
-// PROTECTED ROUTES
-router.get("/progress", verifyToken, gameController.getProgress);
-router.get("/stats", verifyToken, gameController.getUserStats);
+// PROTECTED - Butuh login buat submit
 router.post("/submit/:id", verifyToken, gameController.submitLevel);
+router.get("/stats", verifyToken, gameController.getUserStats);
 
 module.exports = router;
