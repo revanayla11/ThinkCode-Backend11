@@ -1,4 +1,3 @@
-// controllers/gameController.js - FULL VERSION
 const { Op } = require("sequelize");
 const GameLevel = require("../models/GameLevel");
 const GameQuestion = require("../models/GameQuestion");
@@ -7,7 +6,7 @@ const User = require("../models/User");
 const Materi = require("../models/Materi");
 
 const gameController = {
-  // 1. GAME MAP
+  // 1. GAME MAP - FIXED UNLOCK LOGIC 80%
   getGameMap: async (req, res) => {
     try {
       const allLevels = await GameLevel.findAll({
@@ -19,6 +18,7 @@ const gameController = {
         attributes: ["id", "title", "levelNumber", "materi_id", "reward_xp", "gameType"]
       });
 
+      // Group by materi
       const materiMap = {};
       allLevels.forEach(level => {
         const materiId = level.materi_id;
@@ -42,27 +42,34 @@ const gameController = {
       });
 
       const levels = Object.values(materiMap);
+      
+      // 🔥 PROGRESS - HANYA YG >=80% DAN completed=true
       let progress = [];
       let userStats = { xp: 0, streak: 0, hearts: 5 };
 
       if (req.user) {
-        // 🔥 GET USER REAL DATA
         const user = await User.findByPk(req.user.id, { 
           attributes: ["id", "xp", "hearts"] 
         });
         
+        // 🔥 FIXED: Filter completed DAN score >=80
         progress = await UserProgress.findAll({
-          where: { userId: req.user.id },
-          attributes: ["levelId", "completed", "score"]
+          where: { 
+            userId: req.user.id,
+            completed: true,
+            score: { [Op.gte]: 80 }  // ← 80% MINIMUM!
+          },
+          attributes: ["levelId", "completed", "score", "xp"]
         });
 
         userStats = {
           xp: user?.xp || 0,
           hearts: user?.hearts || 5,
-          streak: progress.filter(p => p.completed).length
+          streak: progress.length
         };
       }
 
+      console.log(`✅ Map: ${levels.length} materi, ${progress.length} unlocked levels`);
       res.json({ 
         status: true, 
         levels, 
@@ -109,7 +116,6 @@ const gameController = {
           content: q.content,
           type: q.type,
           meta,
-          // Legacy fields
           options: meta.options || [],
           answerIndex: meta.answerIndex || 0,
           answer: meta.answer || '',
@@ -132,12 +138,12 @@ const gameController = {
     }
   },
 
-  // 🔥 3. SUBMIT LEVEL - XP KE DATABASE USER!
+  // 🔥 3. SUBMIT LEVEL - FIRST TIME XP + 80% UNLOCK + GURU REWARD!
   submitLevel: async (req, res) => {
     try {
       const userId = req.user.id;
       const levelId = req.params.id;
-      const { answers, scorePercent } = req.body; // Frontend kirim score
+      const { answers, scorePercent, heartsUsed = 1 } = req.body;
 
       console.log(`🎮 User ${userId} submit level ${levelId}, score: ${scorePercent}%`);
 
@@ -146,35 +152,57 @@ const gameController = {
         return res.status(404).json({ status: false, message: "Level tidak ditemukan" });
       }
 
-      // 🔥 CALCULATE REAL REWARD XP
-      const completed = scorePercent >= 60;
-      const rewardXp = Math.round((scorePercent / 100) * level.reward_xp);
+      // 🔥 CEK FIRST COMPLETION (belum pernah >=80%)
+      const existingProgress = await UserProgress.findOne({
+        where: {
+          userId,
+          levelId,
+          completed: true,
+          score: { [Op.gte]: 80 }
+        }
+      });
+
+      const isFirstCompletion = !existingProgress;
+      const completed = scorePercent >= 80; // Unlock threshold
+      const perfectReward = level.reward_xp; // Yang ditentukan guru
       
-      // 1. UPDATE USER PROGRESS
+      // 🔥 XP PROPORSIONAL: reward_xp * (score/100)
+      const rewardXp = isFirstCompletion 
+        ? Math.round(perfectReward * (scorePercent / 100))
+        : 0;
+
+      // 1. UPSERT PROGRESS
       await UserProgress.upsert({
         userId,
         levelId,
+        xp: rewardXp,
+        stars: completed ? 3 : Math.floor(scorePercent / 30),
         completed,
-        score: scorePercent
+        score: scorePercent  // ← Simpan score buat unlock logic
       });
 
-      // 🔥 2. UPDATE USER XP & HEARTS DI DATABASE!
+      // 2. UPDATE USER XP & HEARTS
       const user = await User.findByPk(userId);
       if (!user) {
         return res.status(404).json({ status: false, message: "User tidak ditemukan" });
       }
 
-      const oldXp = user.xp || 0;
-      const oldHearts = user.hearts || 5;
-      
-      // Tambah XP
-      user.xp = oldXp + rewardXp;
-      // Kurangi 1 heart per attempt
-      user.hearts = Math.max(0, oldHearts - 1);
+      let oldXp = user.xp || 0;
+      if (rewardXp > 0) {
+        user.xp = oldXp + rewardXp;
+        oldXp = user.xp;
+      }
+
+      // Kurangi hearts
+      user.hearts = Math.max(0, (user.hearts || 5) - heartsUsed);
       
       await user.save();
 
-      console.log(`✅ XP Updated: ${oldXp} → ${user.xp} (+${rewardXp}) | Hearts: ${oldHearts} → ${user.hearts}`);
+      console.log(`✅ ${isFirstCompletion ? '' : 'REPLAY'} User ${userId}: 
+        Level ${level.levelNumber} | Score ${scorePercent}% | 
+        ${completed ? 'UNLOCKED' : 'NOT UNLOCKED'} | 
+        XP ${rewardXp > 0 ? `+${rewardXp}` : 'NO XP'} | 
+        Hearts ${user.hearts}`);
 
       res.json({
         status: true,
@@ -183,7 +211,13 @@ const gameController = {
         totalXp: user.xp,
         hearts: user.hearts,
         completed,
-        message: completed ? "Level completed! 🎉" : "Coba lagi! 💪"
+        isFirstCompletion,
+        perfectReward,
+        message: completed && isFirstCompletion 
+          ? `Level unlocked! +${rewardXp} XP 🎉` 
+          : isFirstCompletion 
+          ? `+${rewardXp} XP! Coba lagi buat unlock (80%+)`
+          : "Nice replay! No XP lagi 😎"
       });
     } catch (err) {
       console.error("❌ submitLevel:", err);
@@ -191,17 +225,18 @@ const gameController = {
     }
   },
 
-  // 4. GET USER STATS
+  // 4. USER STATS
   getUserStats: async (req, res) => {
     try {
       const user = await User.findByPk(req.user.id, { 
         attributes: ["xp", "hearts"] 
       });
       
-      const progress = await UserProgress.count({
+      const progress = await UserProgress.findAll({
         where: { 
           userId: req.user.id, 
-          completed: true 
+          completed: true,
+          score: { [Op.gte]: 80 }
         }
       });
 
@@ -210,11 +245,13 @@ const gameController = {
         stats: {
           xp: user?.xp || 0,
           hearts: user?.hearts || 5,
-          completedLevels: progress,
-          streak: progress > 0 ? 7 : 0
+          completedLevels: progress.length,
+          unlockedLevels: progress.length,
+          streak: progress.length >= 7 ? 7 : progress.length
         }
       });
     } catch (err) {
+      console.error("❌ getUserStats:", err);
       res.status(500).json({ status: false, message: err.message });
     }
   }
