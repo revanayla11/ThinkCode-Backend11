@@ -160,98 +160,28 @@ const gameController = {
   },
 
   // 🔥 3. SUBMIT LEVEL - COMPLETION BASED ✅
-  submitLevel: async (req, res) => {
-    try {
-      const userId = req.user.id;
-      const levelId = req.params.id;
-      const { scorePercent, totalQuestions, correctAnswers, heartsUsed = 1 } = req.body;
+submitLevel: async (req, res) => {
+  try {
+    const { scorePercent } = req.body;
+    const userId = req.user.id;
+    const levelId = Number(req.params.id); // 🔥 NUMBER!
 
-      console.log(`🎮 Submit ${userId}: Level ${levelId} = ${scorePercent}%`);
+    // SELALU SIMPAN - INI PENTING!
+    await UserProgress.upsert({
+      userId,
+      levelId,  // Number
+      completed: scorePercent >= 80,
+      score: scorePercent,
+      updatedAt: new Date()
+    });
 
-      // ✅ VALIDASI SCORE
-      if (scorePercent === undefined || 
-          !Number.isFinite(scorePercent) ||
-          scorePercent > 100 || 
-          scorePercent < 0) {
-        return res.status(400).json({
-          status: false,
-          message: `Invalid scorePercent: ${scorePercent}`
-        });
-      }
+    console.log(`✅ SAVED: user ${userId}, level ${levelId}, score ${scorePercent}%`);
 
-      const level = await GameLevel.findByPk(levelId);
-      if (!level) {
-        return res.status(404).json({
-          status: false,
-          message: "Level tidak ditemukan"
-        });
-      }
-
-      // 🔥 COMPLETED = TRUE kalau score >= 80% (bisa diubah)
-      const completed = scorePercent >= 80;
-
-      // 🔥 CEK FIRST COMPLETION (XP bonus sekali saja)
-      const existing = await UserProgress.findOne({
-        where: {
-          userId,
-          levelId,
-          completed: true
-        }
-      });
-
-      const isFirstCompletion = !existing;
-      const baseXp = level.reward_xp || 20;
-      const rewardXp = (completed && isFirstCompletion)
-        ? Math.round(baseXp * (scorePercent / 100))
-        : 0;
-
-      // 🔥 UPSERT PROGRESS (selalu update)
-      await UserProgress.upsert({
-        userId,
-        levelId,
-        completed,           // ✅ TRUE/FALSE - INI YANG PENTING!
-        score: scorePercent,
-        xp: rewardXp,
-        stars: completed ? 3 : Math.floor(scorePercent / 30),
-        updatedAt: new Date()
-      });
-
-      // 🔥 UPDATE USER XP & HEARTS
-      const user = await User.findByPk(userId);
-      if (rewardXp > 0) {
-        user.xp += rewardXp;
-      }
-      user.hearts = Math.max(0, (user.hearts || 5) - heartsUsed);
-      await user.save();
-
-      console.log("✅ SAVED:", { 
-        levelId, 
-        completed, 
-        scorePercent,
-        rewardXp,
-        hearts: user.hearts 
-      });
-
-      res.json({
-        status: true,
-        data: {
-          scorePercent,
-          completed,           // ✅ Frontend polling ini
-          rewardXp,
-          totalXp: user.xp,
-          hearts: user.hearts,
-          isFirstCompletion,
-          message: completed
-            ? "🎉 Level selesai! Level berikutnya terbuka!"
-            : "📚 Coba lagi untuk menyelesaikan level (≥80%)"
-        }
-      });
-
-    } catch (err) {
-      console.error("❌ submitLevel:", err);
-      res.status(500).json({ status: false, message: err.message });
-    }
-  },
+    res.json({ status: true, completed: scorePercent >= 80 });
+  } catch (err) {
+    res.status(500).json({ status: false, message: err.message });
+  }
+}
 
   // 🔥 4. USER STATS
   getUserStats: async (req, res) => {
