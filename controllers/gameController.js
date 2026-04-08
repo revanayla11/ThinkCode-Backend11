@@ -138,9 +138,23 @@ const gameController = {
   },
 
   // 🔥 3. SUBMIT LEVEL - SELALU SIMPAN PROGRESS (UNLOCK NEXT!)
-  submitLevel: async (req, res) => {
-    try {
-      const userId = req.user.id;
+ submitLevel: async (req, res) => {
+  try {
+    // 🔥 DEBUG LOGS
+    console.log("🔍 FULL REQ:", {
+      user: req.user,
+      userId: req.user?.id,
+      params: req.params,
+      body: req.body
+    });
+    
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ 
+        status: false, 
+        message: 'req.user.id undefined. Check token!' 
+      });
+    }
       const levelId = Number(req.params.id);
       const { scorePercent, totalQuestions = 0, correctAnswers = 0, heartsUsed = 1 } = req.body;
 
