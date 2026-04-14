@@ -428,11 +428,13 @@ exports.getWorkspaceData = async (req, res) => {
     const roomId = parseInt(req.params.roomId);
     const workspace = await Workspace.findOne({ where: { roomId } });
     
-    console.log(`🔍 RAW DB DATA room ${roomId}:`, {
-      id: workspace?.id,
+    // 🔥 DEBUG RAW DB
+    console.log(`🔍 RAW DB room ${roomId}:`, {
+      exists: !!workspace,
       pseudoLen: workspace?.pseudocode?.length || 0,
-      flowRaw: workspace?.flowchart ? `"${workspace.flowchart.substring(0, 50)}..."` : 'NULL',
-      flowLen: workspace?.flowchart?.length || 0
+      flowRaw: workspace?.flowchart ? `"${(workspace.flowchart || '').substring(0, 50)}..."` : 'NULL',
+      flowLen: workspace?.flowchart?.length || 0,
+      flowType: typeof workspace?.flowchart
     });
 
     // TASKS
@@ -441,59 +443,84 @@ exports.getWorkspaceData = async (req, res) => {
     tasks.forEach(t => taskMap[t.taskId] = t.done);
     for (let i = 1; i <= 5; i++) taskMap[i] = !!taskMap[i];
 
-    // PSEUDOCODE - DIRECT
+    // PSEUDOCODE
     const pseudocode = workspace?.pseudocode || "";
 
-    // 🔥 FLOWCHART - NUCLEAR JSON FIXER
-    let flowchartObj = { conditions: [], elseInstruction: "", showElse: false };
+    // 🔥 FLOWCHART - ULTRA BULLETPROOF PARSER
+    let flowchartObj = { 
+      conditions: [], 
+      elseInstruction: "", 
+      showElse: false 
+    };
+    
     const flowRaw = workspace?.flowchart;
-
-    if (flowRaw) {
+    
+    if (flowRaw && flowRaw.trim()) {
       try {
-        // 🔥 STEP 1: Remove ALL escapes
+        console.log(`🔄 FLOW RAW (${flowRaw.length} chars):`, flowRaw.substring(0, 100));
+        
+        // 🔥 STEP 1: CLEAN EXTREME
         let jsonStr = flowRaw
-          .replace(/\\"/g, '"')           // \" → "
-          .replace(/\\\\/g, '\\')         // \\ → \
-          .replace(/\\n/g, '')            // \n → nothing
-          .replace(/\\t/g, '')            // \t → nothing
-          .replace(/\\r/g, '')            // \r → nothing
+          // Fix escaped quotes
+          .replace(/\\"/g, '"')
+          // Fix double backslashes
+          .replace(/\\\\/g, '\\')
+          // Remove newlines/tabs
+          .replace(/[\n\r\t]/g, '')
+          // Fix common JSON issues
+          .replace(/^"(.+)"$/, '$1')  // Remove outer quotes
+          .replace(/\\u0000/g, '')    // Remove null chars
           .trim();
 
-        // 🔥 STEP 2: Manual fix common issues
-        jsonStr = jsonStr.replace(/^\{/, '{').replace(/\$$/, '}');
+        console.log(`🔧 CLEANED JSON (${jsonStr.length}):`, jsonStr);
 
-        console.log(`🔧 FIXED JSON (${jsonStr.length}): "${jsonStr}"`);
+        // 🔥 STEP 2: SAFETY CHECK
+        if (jsonStr.includes('angka > 0') || jsonStr.includes('condition')) {
+          const parsed = JSON.parse(jsonStr);
+          
+          // 🔥 STEP 3: VALIDATE STRUCTURE
+          if (parsed && typeof parsed === 'object') {
+            flowchartObj = {
+              conditions: Array.isArray(parsed.conditions) 
+                ? parsed.conditions.map(c => ({
+                    condition: (c.condition || '').trim(),
+                    yes: (c.yes || '').trim(),
+                    no: (c.no || '').trim()
+                  })).filter(c => c.condition)  // Filter empty
+                : [],
+              elseInstruction: (parsed.elseInstruction || '').trim(),
+              showElse: !!parsed.showElse
+            };
+            
+            console.log(`✅ PARSED SUCCESS: ${flowchartObj.conditions.length} conditions`);
+            console.log(`📋 FIRST COND:`, flowchartObj.conditions[0]?.condition);
+          }
+        }
 
-        // 🔥 STEP 3: Parse
-        const parsed = JSON.parse(jsonStr);
+      } catch (parseErr) {
+        console.error(`❌ PARSE ERROR:`, parseErr.message);
+        console.error(`RAW DATA:`, flowRaw);
         
-        flowchartObj = {
-          conditions: Array.isArray(parsed.conditions) ? parsed.conditions.map(c => ({
-            condition: c.condition || '',
-            yes: c.yes || '',
-            no: c.no || ''
-          })) : [],
-          elseInstruction: parsed.elseInstruction || "",
-          showElse: !!parsed.showElse
-        };
-
-        console.log(`✅ PARSED SUCCESS: ${flowchartObj.conditions.length} conditions`);
-
-      } catch (e) {
-        console.error(`❌ PARSE FAIL:`, e.message);
-        console.error(`RAW:`, flowRaw);
-        
-        // 🔥 LAST RESORT: Manual parse
+        // 🔥 LAST RESORT: Manual detection
         if (flowRaw.includes('angka > 0')) {
           flowchartObj = {
             conditions: [{ condition: 'angka > 0?', yes: 'angka positif', no: '' }],
             elseInstruction: '',
             showElse: false
           };
-          console.log(`🔧 MANUAL PARSE OK`);
+          console.log(`🔧 MANUAL FIX: angka > 0 detected`);
         }
       }
+    } else {
+      console.log('⚠️ No flowchart data in DB');
     }
+
+    // 🔥 FINAL DEBUG
+    console.log(`🎯 FINAL FLOWCHART:`, {
+      conditionsCount: flowchartObj.conditions.length,
+      firstCondition: flowchartObj.conditions[0]?.condition,
+      hasData: flowchartObj.conditions.length > 0
+    });
 
     res.json({
       status: true,
@@ -506,7 +533,7 @@ exports.getWorkspaceData = async (req, res) => {
 
   } catch (err) {
     console.error("getWorkspaceData CRASH:", err);
-    res.status(500).json({ status: false, message: "Server error" });
+    res.status(500).json({ status: false, message: "Server error", error: err.message });
   }
 };
 
