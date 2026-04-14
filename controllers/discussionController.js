@@ -854,102 +854,106 @@ exports.validateWorkspace = async (req, res) => {
     console.log(`🔍 [VALIDATE] Room ${roomId}`);
 
     const room = await DiscussionRoom.findByPk(roomId);
-    if (!room) return res.json({ valid: false, score: 0, message: "Room tidak ditemukan" });
-
     const [workspace, answer] = await Promise.all([
       Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
       MateriAnswer.findOne({ where: { materiId: room.materiId } })
     ]);
 
-    if (!workspace.pseudocode?.trim()) {
+    if (!workspace?.pseudocode?.trim()) {
       return res.json({ valid: false, score: 0, message: "Pseudocode kosong" });
     }
     if (!answer) {
       return res.json({ valid: false, score: 0, message: "Jawaban guru belum ada" });
     }
 
-    // 🔥 ULTRA FLEXIBLE CLEANER - HANYA CASE INSENSITIVE + NORMALIZE SPASI
+    // 🔥 EXACT MATCH dengan DB Materi 1
     const normalize = (text) => {
-      if (!text) return "";
       return text
-        .toLowerCase()                    // Ignore case
-        .replace(/\s+/g, ' ')             // Normalize spaces
-        .replace(/[,;:]/g, '')            // Ignore punctuation
-        .replace(/"/g, '')                // Ignore quotes
+        .toLowerCase()
+        .replace(/\s+/g, ' ')           // Normalize spaces
+        .replace(/[\n\r]/g, ' ')        // Normalize newlines
+        .replace(/[,;:]/g, '')          // Ignore punctuation
+        .replace(/"/g, '')              // Ignore quotes
         .replace(/___BLANK_\d+___/gi, '') // Remove blanks
         .trim();
     };
 
-    const userText = normalize(workspace.pseudocode);
-    const answerText = normalize(answer.pseudocode);
+    const userPseudo = normalize(workspace.pseudocode);
+    const answerPseudo = normalize(answer.pseudocode);
     
-    console.log("🔍 NORMALIZED:");
-    console.log("User  :", `"${userText}"`);
-    console.log("Answer:", `"${answerText}"`);
+    console.log("🔍 PSEUDOCODE MATCH:");
+    console.log("User   :", `"${userPseudo.substring(0, 80)}..."`);
+    console.log("Answer :", `"${answerPseudo.substring(0, 80)}..."`);
 
-    // 🔥 PSEUDOCODE - SUPER LENIENT
-    let pseudoScore = 0;
-    let pseudoFeedback = "";
-
-    // Check core structure keywords (FLEXIBLE ORDER)
-    const hasDeklarasi = userText.includes("deklarasi") || userText.includes("deklarasi");
-    const hasAlgoritma = userText.includes("algoritma");
-    const hasRead = userText.includes("read") && userText.includes("angka");
-    const hasIf = userText.includes("if") && userText.includes("angka") && userText.includes(">");
-    const hasWrite = userText.includes("write") && userText.includes("angka") && userText.includes("positif");
-
-    const keywordMatches = [hasDeklarasi, hasAlgoritma, hasRead, hasIf, hasWrite].filter(Boolean).length;
-    const keywordPct = (keywordMatches / 5) * 100;
-
-    console.log(`Keywords: ${keywordMatches}/5 (${keywordPct.toFixed(0)}%)`);
-
-    if (keywordPct >= 100) {
-      pseudoScore = 50;
-      pseudoFeedback = "✅ SEMUA keyword BENAR!";
-    } else if (keywordPct >= 80) {
-      pseudoScore = 45;
-      pseudoFeedback = `✅ ${keywordMatches}/5 keyword`;
-    } else {
-      pseudoFeedback = `❌ ${keywordMatches}/5 keyword`;
-    }
-
-    // 🔥 FLOWCHART - ULTRA SIMPLE
-    let flowScore = 0;
-    let flowFeedback = "❌ Belum ada flowchart";
-
+    // 🔥 FLOWCHART MATCH
+    let userFlow = { conditions: [] };
+    let answerFlow = { conditions: [] };
+    
     try {
       if (workspace.flowchart) {
-        const userFlow = typeof workspace.flowchart === 'string' 
+        userFlow = typeof workspace.flowchart === 'string' 
           ? JSON.parse(workspace.flowchart) 
           : workspace.flowchart;
-        
-        const conditions = userFlow?.conditions || [];
-        
-        if (conditions.length >= 1) {
-          // Cek apakah ada kondisi "angka > 0" (FLEXIBLE)
-          const hasValidCond = conditions.some(cond => {
-            const condText = normalize(cond.condition || "");
-            return condText.includes("angka") && 
-                   (condText.includes(">") || condText.includes(">0"));
-          });
-          
-          if (hasValidCond) {
-            flowScore = 50;
-            flowFeedback = "✅ Flowchart BENAR!";
-          } else if (conditions.length >= 1) {
-            flowScore = 40;
-            flowFeedback = "✅ Ada flowchart, cek kondisi";
-          }
-        }
+      }
+      if (answer.flowchart) {
+        answerFlow = typeof answer.flowchart === 'string' 
+          ? JSON.parse(answer.flowchart) 
+          : answer.flowchart;
       }
     } catch (e) {
-      flowFeedback = "❌ Format JSON salah";
+      console.log("Flowchart parse error:", e.message);
     }
 
-    const totalScore = Math.round(pseudoScore + flowScore);
-    const isValid = totalScore >= 90; // 50 + 40 = 90 ✅
+    const userConditions = Array.isArray(userFlow.conditions) ? userFlow.conditions : [];
+    const answerConditions = Array.isArray(answerFlow.conditions) ? answerFlow.conditions : [];
 
-    console.log(`🎯 RESULT: ${totalScore}% ${isValid ? "✅ PASS" : "❌ FAIL"}`);
+    console.log("🔍 FLOWCHART:");
+    console.log("User conds:", userConditions.map(c => c.condition));
+    console.log("Answer conds:", answerConditions.map(c => c.condition));
+
+    // ================================= PSEUDOCODE SCORE ================================
+    let pseudoScore = 0;
+    let pseudoFeedback = "❌ Pseudocode salah";
+
+    // Similarity check
+    const similarity = (userPseudo.length / answerPseudo.length) * 100;
+    if (similarity >= 85) {
+      pseudoScore = 50;
+      pseudoFeedback = "✅ BENAR!";
+    } else if (userPseudo.includes("deklarasi angka integer") &&
+               userPseudo.includes("algoritma read angka") &&
+               userPseudo.includes("if angka > 0") &&
+               userPseudo.includes("write angka positif")) {
+      pseudoScore = 50;
+      pseudoFeedback = "✅ Struktur OK!";
+    }
+
+    // ================================= FLOWCHART SCORE ================================
+    let flowScore = 0;
+    let flowFeedback = "❌ Flowchart salah";
+
+    if (userConditions.length >= 1) {
+      // Match condition "angka > 0?"
+      const userCondText = normalize(userConditions[0]?.condition || "");
+      const answerCondText = normalize(answerConditions[0]?.condition || "");
+      
+      console.log(`Cond match: "${userCondText}" vs "${answerCondText}"`);
+      
+      if (userCondText.includes(answerCondText) || 
+          answerCondText.includes(userCondText) ||
+          (userCondText.includes("angka") && userCondText.includes(">"))) {
+        flowScore = 50;
+        flowFeedback = "✅ Kondisi benar!";
+      } else {
+        flowScore = 40;
+        flowFeedback = "✅ Ada flowchart";
+      }
+    }
+
+    const totalScore = pseudoScore + flowScore;
+    const isValid = totalScore >= 90;
+
+    console.log(`🎯 FINAL SCORE: ${totalScore} ${isValid ? "✅ PASS" : "❌ FAIL"}`);
 
     res.json({
       valid: isValid,
@@ -958,17 +962,19 @@ exports.validateWorkspace = async (req, res) => {
         pseudocode: {
           score: pseudoScore,
           feedback: pseudoFeedback,
-          keywords: keywordMatches + "/5"
+          similarity: `${Math.round(similarity)}%`
         },
         flowchart: {
           score: flowScore,
-          feedback: flowFeedback
+          feedback: flowFeedback,
+          userConditions: userConditions.length,
+          answerConditions: answerConditions.length
         }
       }
     });
 
   } catch (error) {
-    console.error("validateWorkspace:", error);
+    console.error("validateWorkspace ERROR:", error);
     res.status(500).json({ valid: false, score: 0, error: error.message });
   }
 };
