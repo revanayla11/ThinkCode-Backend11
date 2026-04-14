@@ -876,15 +876,20 @@ exports.validateWorkspace = async (req, res) => {
     const { roomId } = req.params;
     const safeRoomId = parseInt(roomId);
     
-    console.log(`🔍 [VALIDATE v2] Room ${safeRoomId}`);
+    console.log(`🔍 [VALIDATE] Room ${safeRoomId}`);
 
     const room = await DiscussionRoom.findByPk(safeRoomId);
     if (!room) return res.status(404).json({ valid: false, score: 0, error: "Room not found" });
 
     const workspace = await Workspace.findOne({ where: { roomId: safeRoomId } });
-    if (!workspace) return res.json({ valid: false, score: 0, message: "Workspace kosong" });
+    if (!workspace) {
+      console.log("❌ NO WORKSPACE");
+      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
+    }
 
-    // PSEUDOCODE - INLINE VALIDATION
+    console.log(`📊 WORKSPACE: pseudo=${workspace.pseudocode?.length || 0}, flow=${workspace.flowchart?.length || 0}`);
+
+    // PSEUDOCODE VALIDATION
     let pseudoScore = 0;
     const pseudo = workspace.pseudocode || "";
     if (pseudo.trim()) {
@@ -902,36 +907,75 @@ exports.validateWorkspace = async (req, res) => {
       if (hasIf) pseudoScore += 15;
       if (hasWrite) pseudoScore += 15;
       if (clean.includes('> 0') || clean.includes('positif')) pseudoScore += 15;
+      
+      console.log(`✅ PSEUDO OK: ${pseudoScore}% (${clean.substring(0, 50)}...)`);
     }
 
-    // FLOWCHART - ULTRA SAFE
+    // 🔥 FLOWCHART - ULTRA SAFE PARSER
     let flowScore = 0;
+    let flowDetails = { match: false, score: 0, feedback: "❌ No flowchart data", rawLength: 0 };
     const flowRaw = workspace.flowchart || "";
-    console.log(`🔄 Flow raw (${flowRaw.length}): ${flowRaw.slice(0, 50)}`);
+    
+    console.log(`🔄 FLOW RAW (${flowRaw.length}):`, flowRaw.substring(0, 100));
 
-    if (flowRaw.trim()) {
+    if (flowRaw && flowRaw.trim().length > 10) { // Minimal JSON length
       try {
-        // Fix double-escaped JSON
-        let jsonStr = flowRaw.replace(/\\"/g, '"');
+        // 🔥 FIX DOUBLE ESCAPE & INVALID JSON
+        let jsonStr = flowRaw
+          .replace(/\\"/g, '"')  // Fix escaped quotes
+          .replace(/\\\//g, '/') // Fix escaped slashes
+          .replace(/\n/g, '')    // Remove newlines
+          .trim();
+
+        console.log(`🔧 CLEAN JSON:`, jsonStr.substring(0, 100));
+
         const flow = JSON.parse(jsonStr);
-        
-        console.log(`✅ Flow parsed: conditions=${flow.conditions?.length}`);
-        
+        console.log(`✅ PARSED FLOW:`, flow);
+
         if (Array.isArray(flow.conditions) && flow.conditions.length > 0) {
-          const cond = flow.conditions[0];
           flowScore = 50;
-          if (cond.condition?.includes('>')) flowScore += 25;
-          if (cond.yes?.trim()) flowScore += 25;
+          const firstCond = flow.conditions[0];
+          
+          // CEK KONDISI
+          const condText = (firstCond.condition || '').toLowerCase().trim();
+          if (condText.includes('> 0') || condText.includes('positif')) {
+            flowScore += 30;
+          } else if (condText.includes('>')) {
+            flowScore += 20;
+          }
+
+          // CEK YES INSTRUCTION
+          if (firstCond.yes?.trim()) flowScore += 20;
+
+          flowDetails = {
+            match: flowScore >= 80,
+            score: flowScore,
+            feedback: `✅ ${flow.conditions.length} kondisi OK! (${firstCond.condition})`,
+            rawLength: flowRaw.length,
+            parsedConditions: flow.conditions.length,
+            firstCondition: firstCond.condition
+          };
+
+          console.log(`✅ FLOW OK: ${flowScore}% (${firstCond.condition})`);
+
+        } else {
+          console.log("❌ EMPTY CONDITIONS");
         }
-      } catch (e) {
-        console.error(`❌ Flow parse: ${e.message}`);
+
+      } catch (parseErr) {
+        console.error(`❌ JSON PARSE ERROR:`, parseErr.message);
+        console.error(`RAW DATA:`, flowRaw);
+        flowDetails.feedback = `❌ Parse error: ${parseErr.message}`;
       }
+    } else {
+      console.log("❌ FLOW TOO SHORT");
     }
 
+    // FINAL SCORE
     const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
     const valid = totalScore >= 75;
 
-    console.log(`📊 FINAL: Pseudo=${pseudoScore} Flow=${flowScore} Total=${totalScore}`);
+    console.log(`🎯 FINAL: Pseudo=${pseudoScore} Flow=${flowScore} TOTAL=${totalScore}% ${valid ? '✅ PASS' : '❌ FAIL'}`);
 
     res.json({
       valid,
@@ -942,17 +986,12 @@ exports.validateWorkspace = async (req, res) => {
           score: pseudoScore,
           feedback: pseudoScore >= 80 ? "✅ Perfect pseudocode!" : "⚠️ Check structure"
         },
-        flowchart: {
-          match: flowScore >= 80,
-          score: flowScore,
-          feedback: flowScore > 0 ? "✅ Flowchart OK!" : "❌ No flowchart data",
-          rawLength: flowRaw.length
-        }
+        flowchart: flowDetails
       }
     });
 
   } catch (error) {
-    console.error("❌ VALIDATE ERROR:", error.message);
+    console.error("❌ VALIDATE CRASH:", error);
     res.status(500).json({ valid: false, score: 0, error: error.message });
   }
 };
