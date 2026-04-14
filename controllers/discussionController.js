@@ -777,64 +777,90 @@ END`,
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
-    console.log(`🔍 Validating room ${roomId}`);
-    
-    // 🔥 GET WORKSPACE DULU - INDEPENDEN
-    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
-    
+
+    const workspace = await Workspace.findOne({
+      where: { roomId: parseInt(roomId) }
+    });
+
     if (!workspace) {
-      return res.json({ 
-        valid: false, 
-        score: 0, 
-        message: "Workspace belum dibuat. Save pseudocode & flowchart dulu!",
-        details: { pseudocodeMatch: false, flowchartMatch: false }
+      return res.json({
+        valid: false,
+        score: 0,
+        message: "Workspace belum ada"
       });
     }
-    
-    // 🔥 CHECK PSEUDOCODE
-    const hasPseudo = !!workspace.pseudocode?.trim();
-    const pseudoScore = hasPseudo ? 50 : 0;
-    
-    // 🔥 CHECK FLOWCHART
-    let hasFlowchart = false;
-    let flowScore = 0;
-    try {
-      const flowData = workspace.flowchart;
-      if (flowData) {
-        const parsed = typeof flowData === 'string' ? JSON.parse(flowData) : flowData;
-        hasFlowchart = Array.isArray(parsed.conditions) && parsed.conditions.length > 0;
-        flowScore = hasFlowchart ? 50 : 0;
-      }
-    } catch (e) {
-      console.log(`Flow parse error:`, e.message);
+
+    const room = await DiscussionRoom.findByPk(roomId);
+
+    const answer = await MateriAnswer.findOne({
+      where: { materiId: room.materiId }
+    });
+
+    const normalize = (text) =>
+      text
+        ?.toLowerCase()
+        .replace(/\s+/g, " ")
+        .replace(/[^a-z0-9<>=! ]/g, "")
+        .trim();
+
+    // 🔥 PSEUDOCODE
+    let pseudoScore = 0;
+    let pseudoMatch = false;
+
+    if (workspace.pseudocode && answer?.pseudocode) {
+      const userPseudo = normalize(workspace.pseudocode);
+      const correctPseudo = normalize(answer.pseudocode);
+
+      const similarity =
+        userPseudo === correctPseudo
+          ? 100
+          : userPseudo.includes(correctPseudo)
+          ? 80
+          : 50;
+
+      pseudoScore = similarity >= 80 ? 50 : 0;
+      pseudoMatch = similarity >= 80;
     }
-    
-    // 🔥 TOTAL - SIMPEL 50/50
-    const totalScore = Math.round(pseudoScore + flowScore);
-    const valid = totalScore >= 90; // Harus 2/2
-    
-    console.log(`✅ room ${roomId}: pseudo=${pseudoScore} flow=${flowScore} total=${totalScore}`);
+
+    // 🔥 FLOWCHART
+    let flowScore = 0;
+    let flowMatch = false;
+
+    try {
+      const userFlow =
+        typeof workspace.flowchart === "string"
+          ? JSON.parse(workspace.flowchart)
+          : workspace.flowchart;
+
+      const correctFlow = answer?.flowchart;
+
+      if (userFlow && correctFlow) {
+        const userConditions = userFlow.conditions?.length || 0;
+        const correctConditions = correctFlow.conditions?.length || 0;
+
+        if (userConditions === correctConditions) {
+          flowScore = 50;
+          flowMatch = true;
+        }
+      }
+    } catch (err) {
+      console.log("Flow error:", err.message);
+    }
+
+    const totalScore = pseudoScore + flowScore;
 
     res.json({
-      valid,
+      valid: totalScore >= 90,
       score: totalScore,
       details: {
-        pseudocodeMatch: hasPseudo,
-        pseudocodeSimilarity: pseudoScore,
-        flowchartMatch: hasFlowchart,
-        flowchartScore: flowScore,
-        hasWorkspace: true
+        pseudocodeMatch: pseudoMatch,
+        flowchartMatch: flowMatch
       }
     });
 
   } catch (error) {
-    console.error(`❌ validateWorkspace ${req.params.roomId}:`, error);
-    res.status(500).json({ 
-      valid: false, 
-      score: 0, 
-      error: "Server error - cek console",
-      details: { error: error.message }
-    });
+    console.error("validateWorkspace:", error);
+    res.status(500).json({ valid: false, score: 0 });
   }
 };
 
