@@ -148,6 +148,8 @@ exports.completeStep = async (req, res) => {
     const materiId = parseInt(req.params.id);
     const { step } = req.body;
 
+    console.log('✅ Valid STEPS:', STEPS)
+
     // ✅ Validasi semua 4 STEPS
     if (!STEPS.includes(step)) {
       return res.status(400).json({ status: false, message: "Invalid step" });
