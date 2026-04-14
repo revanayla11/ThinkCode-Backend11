@@ -21,7 +21,7 @@ const Workspace = sequelize.define('Workspace', {
     allowNull: true,
   },
   flowchart: {
-    type: DataTypes.JSON, 
+    type: DataTypes.TEXT, 
     allowNull: true,
   },
 }, {
