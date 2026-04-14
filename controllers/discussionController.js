@@ -854,14 +854,13 @@ exports.validateWorkspace = async (req, res) => {
       return res.json({ valid: false, score: 0, message: "Workspace kosong" });
     }
 
-    // ================= NORMALIZER YANG BENAR =================
+    // ================= NORMALIZER SIMPEL =================
     const normalize = (text) => {
       if (!text) return "";
       return text
-        .replace(/\$\s*BLANK\s*\d+\s*\$/gi, '')
-        .replace(/___BLANK_\d+___/gi, '')
-        .replace(/\$BLANK\s*\d+\$/gi, '')
-        .replace(/[\r\n]+/g, ' ')
+        .replace(/___BLANK_\d+___/gi, '')           // Hapus blanks
+        .replace(/\$BLANK\s*\d+\$/gi, '')           // Hapus [BLANK]
+        .replace(/[\r\n\s]+/g, ' ')                 // Satu spasi
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
@@ -870,77 +869,67 @@ exports.validateWorkspace = async (req, res) => {
     const userRaw = workspace.pseudocode || "";
     const userPseudo = normalize(userRaw);
     
-    console.log("🧪 RAW USER:", `"${userRaw}"`);
-    console.log("✅ NORM USER:", `"${userPseudo}"`);
+    console.log("🧪 USER PSEUDO:", `"${userPseudo}"`);
 
-    // 🔥 MATERI 1 - JAWABAN BENAR (UPDATE SESUAI TEMPLATE)
-    const expectedRaw = `DEKLARASI
-    angka : integer
-
-ALGORITMA
-    read(angka)
+    // 🔥 MATERI DYNAMIC - JAWABAN BENAR
+    let expectedRaw = "";
+    const materiNum = room?.materiId || 1;
     
-    IF (angka > 0) THEN
-        write("Angka ", angka, " adalah Positif")
-    ENDIF
-
-END`;
+    switch (parseInt(materiNum)) {
+      case 1: // IF SEDERHANA
+        expectedRaw = `DEKLARASI angka : integer ALGORITMA read(angka) IF (angka > 0) THEN write("Angka ", angka, " adalah Positif") ENDIF END`;
+        break;
+      case 2: // IF-ELSE
+        expectedRaw = `DEKLARASI nilai : integer ALGORITMA read(nilai) IF (nilai >= 70) THEN write("Status: Lulus") ELSE write("Status: Tidak Lulus") ENDIF END`;
+        break;
+      case 3: // IF-ELSEIF-ELSE
+        expectedRaw = `DEKLARASI umur : integer ALGORITMA read(umur) IF (umur <= 12) THEN write("Kategori: Anak-anak") ELSE IF (umur <= 17) THEN write("Kategori: Remaja") ELSE IF (umur <= 59) THEN write("Kategori: Dewasa") ELSE write("Kategori: Lansia") ENDIF END`;
+        break;
+      default:
+        expectedRaw = `DEKLARASI angka : integer ALGORITMA read(angka) IF (angka > 0) THEN write("Angka ", angka) ENDIF END`;
+    }
 
     const answerPseudo = normalize(expectedRaw);
-    console.log("✅ NORM ANSWER:", `"${answerPseudo}"`);
+    console.log("✅ ANSWER PSEUDO:", `"${answerPseudo}"`);
 
-    // ================= DEBUG SIMILARITY =================
-    const similarity = (str1, str2) => {
-      const longer = str1.length > str2.length ? str1 : str2;
-      const shorter = str1.length > str2.length ? str2 : str1;
-      return (shorter.length / longer.length) * 100;
+    // ================= VALIDASI PSEUDOCODE - SUPER SIMPLE =================
+    const checkKeyElements = (user, answer) => {
+      const elements = {
+        deklarasi: user.includes("deklarasi"),
+        algoritma: user.includes("algoritma"),
+        read: user.includes("read"),
+        if: user.includes("if"),
+        write: user.includes("write"),
+        endif: user.includes("endif") || user.includes("end")
+      };
+
+      // Cek variabel & kondisi spesifik
+      const hasCorrectVar = user.includes("angka") || user.includes("nilai") || user.includes("umur");
+      const hasCorrectCond = user.includes("> 0") || user.includes(">= 70") || user.includes("<= 12");
+      const hasOutput = user.includes("positif") || user.includes("lulus") || user.includes("kategori");
+
+      console.log("🔍 ELEMENTS:", { ...elements, hasCorrectVar, hasCorrectCond, hasOutput });
+
+      // ✅ SCORING BERDASARKAN ELEMEN
+      let score = 0;
+      if (elements.deklarasi && elements.algoritma) score += 15;
+      if (elements.read && hasCorrectVar) score += 15;
+      if (elements.if && hasCorrectCond) score += 20;
+      if (elements.write && hasOutput) score += 20;
+      if (elements.endif) score += 10;
+      
+      // Bonus similarity
+      const wordsMatch = (user.split(' ').filter(word => answer.includes(word)).length / answer.split(' ').length) * 15;
+      score += Math.min(wordsMatch, 15);
+
+      return Math.min(100, score);
     };
 
-    console.log("📏 SIMILARITY:", `${similarity(userPseudo, answerPseudo).toFixed(1)}%`);
+    const pseudoScore = checkKeyElements(userPseudo, answerPseudo);
+    const pseudoMatch = pseudoScore >= 80;
+    const pseudoFeedback = getPseudoFeedback(pseudoScore, userPseudo);
 
-    // ================= PSEUDOCODE VALIDATION - DETAIL =================
-    let pseudoScore = 0;
-    let pseudoMatch = false;
-    let pseudoFeedback = "";
-
-    // ✅ EXACT MATCH (Paling ketat)
-    if (userPseudo === answerPseudo) {
-      pseudoScore = 50;
-      pseudoMatch = true;
-      pseudoFeedback = "✅ PERFECT MATCH!";
-    } 
-    // ✅ HIGH SIMILARITY (95%+)
-    else if (similarity(userPseudo, answerPseudo) >= 95) {
-      pseudoScore = 48;
-      pseudoMatch = true;
-      pseudoFeedback = "✅ Hampir perfect!";
-    }
-    // ✅ KEY ELEMENTS CHECK (Lebih fleksibel)
-    else {
-      const hasDeklarasi = userPseudo.includes("deklarasi") && userPseudo.includes("angka");
-      const hasRead = userPseudo.includes("read") && userPseudo.includes("angka");
-      const hasIf = userPseudo.includes("if") && userPseudo.includes("angka > 0");
-      const hasWrite = userPseudo.includes("write") && userPseudo.includes("angka") && userPseudo.includes("positif");
-      
-      console.log("🔍 ELEMENTS:", { hasDeklarasi, hasRead, hasIf, hasWrite });
-
-      if (hasDeklarasi && hasRead && hasIf && hasWrite) {
-        pseudoScore = 45;
-        pseudoMatch = true;
-        pseudoFeedback = "✅ Semua elemen benar!";
-      } else if (hasDeklarasi && hasRead && hasIf) {
-        pseudoScore = 35;
-        pseudoFeedback = "⚠️ Bagus! Cek output write";
-      } else if (hasDeklarasi && hasRead) {
-        pseudoScore = 25;
-        pseudoFeedback = "✅ Struktur dasar OK, tambah IF";
-      } else {
-        pseudoScore = 10;
-        pseudoFeedback = "❌ Perbaiki struktur dasar";
-      }
-    }
-
-    // ================= FLOWCHART VALIDATION =================
+    // ================= VALIDASI FLOWCHART - SUPER FLEXIBLE =================
     let flowScore = 0;
     let flowMatch = false;
     let flowFeedback = "❌ Flowchart kosong";
@@ -950,32 +939,45 @@ END`;
         const flow = JSON.parse(workspace.flowchart);
         const conditions = Array.isArray(flow.conditions) ? flow.conditions : [];
         
-        console.log("🔍 FLOW Conditions:", conditions.map(c => c.condition));
-        
         if (conditions.length > 0) {
+          // ✅ CEK KONDISI PERTAMA SAJA (FLEKSIBEL)
           const userCond = normalize(conditions[0].condition || "");
-          console.log("🔍 USER COND NORM:", `"${userCond}"`);
           
-          if (userCond.includes("angka > 0") || userCond.includes("> 0") || userCond.includes(">0")) {
-            flowScore = 50;
+          // Kondisi yang diterima (FLEKSIBEL BANGET!)
+          const validConditions = [
+            "angka > 0", "> 0", "angka>0",
+            "nilai >= 70", ">= 70", "nilai>=70",
+            "umur <= 12", "<= 12", "umur<=12"
+          ];
+          
+          const isValidCond = validConditions.some(valid => 
+            userCond.includes(valid.replace(/angka|nilai|umur/gi, '').trim())
+          );
+          
+          console.log("🔍 FLOW COND:", `"${userCond}"`, "VALID?", isValidCond);
+
+          if (isValidCond) {
+            flowScore = 100;
             flowMatch = true;
             flowFeedback = "✅ Kondisi flowchart BENAR!";
           } else {
-            flowScore = 25;
-            flowFeedback = `⚠️ Kondisi: "${userCond}" ≠ "angka > 0"`;
+            flowScore = 50;
+            flowFeedback = `⚠️ Kondisi: "${userCond}" - coba "> 0" atau ">= 70"`;
           }
+          
+          // Bonus: ada YES instruction
+          if (conditions[0].yes?.trim()) flowScore += 10;
         } else {
-          flowFeedback = "❌ Belum ada kondisi";
+          flowFeedback = "❌ Tambahkan minimal 1 kondisi";
         }
       } catch (e) {
-        console.error("Flow parse error:", e.message);
         flowFeedback = "❌ Flowchart rusak";
       }
     }
 
     // ================= FINAL SCORE =================
-    const totalScore = Math.round(pseudoScore + flowScore);
-    const isValid = totalScore >= 90;
+    const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4)); // 60% pseudo, 40% flow
+    const isValid = totalScore >= 75; // TURUN dari 90 ke 75!
 
     console.log(`🎯 FINAL: PSEUDO=${pseudoScore} | FLOW=${flowScore} | TOTAL=${totalScore} | VALID=${isValid}`);
 
@@ -988,10 +990,7 @@ END`;
           match: pseudoMatch,
           score: pseudoScore,
           feedback: pseudoFeedback,
-          userRaw: userRaw,
-          userNormalized: userPseudo,
-          answerNormalized: answerPseudo,
-          similarity: `${similarity(userPseudo, answerPseudo).toFixed(1)}%`,
+          userRaw,
           hasBlanks: userRaw.includes('___BLANK') || userRaw.includes('[BLANK')
         },
         flowchart: {
@@ -1006,6 +1005,15 @@ END`;
     console.error("❌ VALIDATE ERROR:", error);
     res.status(500).json({ valid: false, score: 0, error: error.message });
   }
+};
+
+// 🔥 HELPER FEEDBACK SIMPEL
+const getPseudoFeedback = (score, userPseudo) => {
+  if (score >= 90) return "✅ PERFECT!";
+  if (score >= 80) return "✅ Bagus banget!";
+  if (score >= 60) return "⚠️ Tambah kondisi/output";
+  if (score >= 40) return "✅ Struktur OK, lengkapi IF";
+  return "❌ Periksa struktur dasar";
 };
 // Buat endpoint baru untuk template dinamis
 // 🔥 FULL DYNAMIC TEMPLATE - discussionController.js
