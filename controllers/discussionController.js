@@ -480,113 +480,88 @@ exports.getTaskProgress = async (req, res) => {
 };
 
 /* ================= SAVE PSEUDOCODE - FIXED ================= */
+/* ================= SAVE PSEUDOCODE - KEEP FLOWCHART ✅ ================= */
 exports.savePseudocode = async (req, res) => {
-  const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
-    const userId = req.user.id;
 
+    // 🔥 GET INPUT
     let filledPseudocode = "";
-
-    // 🔥 FALLBACK 1: Cek template + answers (NEW FORMAT)
     if (req.body.template && Array.isArray(req.body.answers)) {
       filledPseudocode = fillBlanks(req.body.template, req.body.answers);
-      console.log("✅ NEW FORMAT: template + answers");
-    }
-    // 🔥 FALLBACK 2: Cek pseudocode langsung (OLD FORMAT)
-    else if (req.body.pseudocode) {
+    } else if (req.body.pseudocode) {
       filledPseudocode = req.body.pseudocode.trim();
-      console.log("✅ OLD FORMAT: pseudocode direct");
-    }
-    else {
-      await transaction.rollback();
-      return res.status(400).json({ message: "Data pseudocode kosong" });
+    } else {
+      return res.status(400).json({ error: "No pseudocode data" });
     }
 
-    // 🔥 NORMALIZE
-    const cleaned = filledPseudocode
-      .replace(/\s+/g, ' ')
-      .trim();
+    const cleaned = filledPseudocode.replace(/\s+/g, ' ').trim();
+    console.log('📝 PSEUDO:', cleaned.substring(0, 50));
 
-    console.log("🧪 SAVED:", cleaned.substring(0, 100) + "...");
+    // 🔥 GET EXISTING - PENTING!
+    const existing = await Workspace.findOne({ where: { roomId } });
+    
+    // 🔥 UPDATE - KEEP FLOWCHART!
+    await Workspace.update({
+      pseudocode: cleaned,
+      updatedAt: new Date()
+    }, { where: { roomId } });
 
-    // 🔥 SIMPAN
-    await Workspace.upsert({
-      roomId,
-      pseudocode: cleaned
-    }, { transaction });
-
-    // Count attempts
-    const attemptCount = await WorkspaceAttempt.count({
-      where: { roomId, type: "pseudocode" },
-      transaction
+    // 🔥 TASK 3 + ATTEMPT
+    await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true });
+    
+    const attemptCount = await WorkspaceAttempt.count({ 
+      where: { roomId, type: 'pseudocode' } 
+    });
+    await WorkspaceAttempt.create({
+      roomId, type: 'pseudocode', 
+      attemptNumber: attemptCount + 1, 
+      content: cleaned
     });
 
-    await WorkspaceAttempt.create({
-      roomId,
-      type: "pseudocode",
-      attemptNumber: attemptCount + 1,
-      content: cleaned
-    }, { transaction });
-
-    await RoomTaskProgress.upsert({ 
-      roomId, 
-      taskId: 3, 
-      done: true 
-    }, { transaction });
-
-    await transaction.commit();
+    // 🔥 VERIFY
+    const verify = await Workspace.findOne({ where: { roomId } });
+    console.log('✅ PSEUDO SAVE:', {
+      pseudocodeLength: verify.pseudocode?.length || 0,
+      flowchartKept: verify.flowchart?.conditions?.length || 0
+    });
 
     res.json({
       status: true,
-      message: "✅ Pseudocode saved!",
-      preview: cleaned.substring(0, 100) + "...",
+      message: '✅ Pseudocode saved!',
+      preview: cleaned.substring(0, 50) + '...',
       attempts: attemptCount + 1
     });
 
-  } catch (err) {
-    await transaction.rollback();
-    console.error("savePseudocode ERROR:", err);
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    console.error('💥 PSEUDO ERROR:', error);
+    res.status(500).json({ error: error.message });
   }
 };
-
-// 🔥 HELPER FUNCTION - Tambahkan ini
-const fillBlanks = (template, answers) => {
-  let filled = template || "";
-  answers.forEach((answer, i) => {
-    const placeholder = `___BLANK_${i}___`;
-    filled = filled.replaceAll(placeholder, answer || `[BLANK ${i+1}]`);
-  });
-  return filled;
-};
-/* ================= SAVE FLOWCHART ================= */
-/* ================= SAVE FLOWCHART - BULLETPROOF ✅ ================= */
+/* ================= SAVE FLOWCHART - KEEP PSEUDOCODE ✅ ================= */
 exports.saveFlowchart = async (req, res) => {
   console.log('🚀 saveFlowchart START');
   
   try {
-    // 🔥 BASIC VALIDATION
     const roomId = parseInt(req.params.roomId);
-    if (!roomId || roomId <= 0) {
-      return res.status(400).json({ error: 'Invalid roomId' });
-    }
-
     const { flowchart } = req.body;
-    console.log('📥 BODY:', JSON.stringify(flowchart, null, 2));
-    
-    if (!flowchart) {
-      return res.status(400).json({ error: 'No flowchart data' });
+
+    console.log('📥 FLOWCHART:', JSON.stringify(flowchart, null, 2));
+
+    // 🔥 GET EXISTING WORKSPACE - PENTING!
+    const existing = await Workspace.findOne({ where: { roomId } });
+    if (!existing) {
+      return res.status(400).json({ error: 'Workspace not found' });
     }
 
-    // 🔥 CLEAN & FILTER
+    // 🔥 CLEAN FLOWCHART
     const cleanConditions = (flowchart.conditions || [])
       .map(c => ({
         condition: String(c.condition || '').trim(),
         yes: String(c.yes || '').trim(),
         no: String(c.no || '').trim()
       }))
-      .filter(c => c.condition.length > 0);
+      .filter(c => c.condition);
 
     const cleanFlow = {
       conditions: cleanConditions,
@@ -594,28 +569,21 @@ exports.saveFlowchart = async (req, res) => {
       showElse: Boolean(flowchart.showElse)
     };
 
-    console.log(`🔍 CLEAN: ${cleanFlow.conditions.length} conditions`);
-
     if (cleanFlow.conditions.length === 0) {
-      return res.status(400).json({ 
-        error: 'No valid conditions', 
-        count: cleanConditions.length 
-      });
+      return res.status(400).json({ error: 'No valid conditions' });
     }
 
-    // 🔥 NO TRANSACTION - DIRECT SAVE (UNTUK DEBUG)
-    const [workspace, created] = await Workspace.upsert({
-      roomId,
-      flowchart: cleanFlow,
-      // Keep existing pseudocode
-      pseudocode: Workspace.sequelize.fn('COALESCE', Workspace.sequelize.col('pseudocode'), '')
+    // 🔥 UPDATE - KEEP PSEUDOCODE!
+    await Workspace.update({
+      flowchart: cleanFlow,  // ✅ JSON COLUMN - AUTO STRINGIFY
+      updatedAt: new Date()
+    }, { 
+      where: { roomId } 
     });
 
     // 🔥 TASK 4
     await RoomTaskProgress.upsert({ 
-      roomId, 
-      taskId: 4, 
-      done: true 
+      roomId, taskId: 4, done: true 
     });
 
     // 🔥 ATTEMPT
@@ -624,36 +592,31 @@ exports.saveFlowchart = async (req, res) => {
     });
     
     await WorkspaceAttempt.create({
-      roomId,
-      type: 'flowchart',
-      attemptNumber: attemptCount + 1,
-      content: JSON.stringify(cleanFlow)
+      roomId, type: 'flowchart', 
+      attemptNumber: attemptCount + 1, 
+      content: JSON.stringify(cleanFlow)  // Manual stringify untuk log
     });
 
-    console.log(`✅ SAVED room ${roomId}: ${cleanFlow.conditions.length} conds`);
+    // 🔥 VERIFY SAVE
+    const verify = await Workspace.findOne({ where: { roomId } });
+    console.log('✅ DB AFTER SAVE:', {
+      pseudocodeLength: verify.pseudocode?.length || 0,
+      flowchartConditions: verify.flowchart?.conditions?.length || 0
+    });
 
     res.json({
       status: true,
       message: `✅ Saved ${cleanFlow.conditions.length} conditions`,
       data: {
+        pseudocodeKept: !!existing.pseudocode,
         conditions: cleanFlow.conditions.length,
-        firstCondition: cleanFlow.conditions[0],
         attempts: attemptCount + 1
       }
     });
 
   } catch (error) {
-    console.error('💥 FULL ERROR:', {
-      message: error.message,
-      stack: error.stack,
-      roomId: req.params.roomId,
-      body: req.body
-    });
-    
-    res.status(500).json({ 
-      error: 'Save failed', 
-      message: error.message 
-    });
+    console.error('💥 ERROR:', error.message);
+    res.status(500).json({ error: error.message });
   }
 };
 /* ================= GET WORKSPACE ================= */
