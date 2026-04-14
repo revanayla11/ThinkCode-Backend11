@@ -46,9 +46,10 @@ router.get("/upload/:roomId/check", verifyToken, discussionController.checkAllTa
 // routes/discussion.js - TAMBAHKAN INI
 router.post("/room/:roomId/task/:taskId/toggle", verifyToken, discussionController.toggleTask); // ✅ NEW
 
-router.get('/template-dynamic/:materiId', discussionController.getDynamicTemplate);
+router.get('/template-dynamic/:materiId', verifyToken, discussionController.getDynamicTemplate);
 
 router.post('/room/:roomId/debug', auth, verifyToken, discussionController.debugRoom);
 router.get('/room/:roomId/debug-validation', auth, verifyToken, discussionController.debugValidation);
+router.get('/room/:roomId/workspace-raw', auth, verifyToken, discussionController.debugWorkspaceRaw);
 module.exports = router;
 
