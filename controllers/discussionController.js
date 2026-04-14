@@ -854,30 +854,26 @@ exports.validateWorkspace = async (req, res) => {
       return res.json({ valid: false, score: 0, message: "Workspace kosong" });
     }
 
-    // ================= SUPER NORMALIZER =================
+    // ================= NORMALIZER YANG BENAR =================
     const normalize = (text) => {
       if (!text) return "";
       return text
-        // 🔥 CLEAN BLANKS DULU
-        .replace(/\$\s*BLANK\s*\d+\s*\$/gi, ' ')
-        .replace(/___BLANK_\d+___/gi, ' ')
-        .replace(/\$BLANK\s*\d+\$/gi, ' ')
-        // 🔥 TEXT CLEANING
-        .toLowerCase()
-        .replace(/[\n\r\t]+/g, ' ')
+        .replace(/\$\s*BLANK\s*\d+\s*\$/gi, '')
+        .replace(/___BLANK_\d+___/gi, '')
+        .replace(/\$BLANK\s*\d+\$/gi, '')
+        .replace(/[\r\n]+/g, ' ')
         .replace(/\s+/g, ' ')
-        .replace(/[,;:()"]/g, ' ')
-        .replace(/[:]+/g, ' ')
-        .trim();
+        .trim()
+        .toLowerCase();
     };
 
     const userRaw = workspace.pseudocode || "";
     const userPseudo = normalize(userRaw);
     
-    console.log("🧪 RAW USER:", userRaw.substring(0, 100));
+    console.log("🧪 RAW USER:", `"${userRaw}"`);
     console.log("✅ NORM USER:", `"${userPseudo}"`);
 
-    // 🔥 HARDCODE JAWABAN BENAR MATERI 1
+    // 🔥 MATERI 1 - JAWABAN BENAR (UPDATE SESUAI TEMPLATE)
     const expectedRaw = `DEKLARASI
     angka : integer
 
@@ -893,36 +889,55 @@ END`;
     const answerPseudo = normalize(expectedRaw);
     console.log("✅ NORM ANSWER:", `"${answerPseudo}"`);
 
-    // ================= PSEUDOCODE VALIDATION =================
+    // ================= DEBUG SIMILARITY =================
+    const similarity = (str1, str2) => {
+      const longer = str1.length > str2.length ? str1 : str2;
+      const shorter = str1.length > str2.length ? str2 : str1;
+      return (shorter.length / longer.length) * 100;
+    };
+
+    console.log("📏 SIMILARITY:", `${similarity(userPseudo, answerPseudo).toFixed(1)}%`);
+
+    // ================= PSEUDOCODE VALIDATION - DETAIL =================
     let pseudoScore = 0;
     let pseudoMatch = false;
-    let pseudoFeedback = "❌ Struktur dasar salah";
+    let pseudoFeedback = "";
 
-    // ✅ EXACT MATCH
+    // ✅ EXACT MATCH (Paling ketat)
     if (userPseudo === answerPseudo) {
       pseudoScore = 50;
       pseudoMatch = true;
       pseudoFeedback = "✅ PERFECT MATCH!";
     } 
-    // ✅ FUZZY MATCH (90% similarity)
-    else if (userPseudo.includes("deklarasi angka") && 
-             userPseudo.includes("read angka") && 
-             userPseudo.includes("if angka > 0") && 
-             userPseudo.includes("write angka adalah positif")) {
-      pseudoScore = 45;
+    // ✅ HIGH SIMILARITY (95%+)
+    else if (similarity(userPseudo, answerPseudo) >= 95) {
+      pseudoScore = 48;
       pseudoMatch = true;
       pseudoFeedback = "✅ Hampir perfect!";
     }
-    // Partial
-    else if (userPseudo.includes("deklarasi") && 
-             userPseudo.includes("read") && 
-             userPseudo.includes("if") && 
-             userPseudo.includes("write")) {
-      pseudoScore = 35;
-      pseudoFeedback = "⚠️ Struktur OK, cek detail";
-    } else {
-      pseudoScore = 10;
-      pseudoFeedback = "❌ Perbaiki struktur dasar";
+    // ✅ KEY ELEMENTS CHECK (Lebih fleksibel)
+    else {
+      const hasDeklarasi = userPseudo.includes("deklarasi") && userPseudo.includes("angka");
+      const hasRead = userPseudo.includes("read") && userPseudo.includes("angka");
+      const hasIf = userPseudo.includes("if") && userPseudo.includes("angka > 0");
+      const hasWrite = userPseudo.includes("write") && userPseudo.includes("angka") && userPseudo.includes("positif");
+      
+      console.log("🔍 ELEMENTS:", { hasDeklarasi, hasRead, hasIf, hasWrite });
+
+      if (hasDeklarasi && hasRead && hasIf && hasWrite) {
+        pseudoScore = 45;
+        pseudoMatch = true;
+        pseudoFeedback = "✅ Semua elemen benar!";
+      } else if (hasDeklarasi && hasRead && hasIf) {
+        pseudoScore = 35;
+        pseudoFeedback = "⚠️ Bagus! Cek output write";
+      } else if (hasDeklarasi && hasRead) {
+        pseudoScore = 25;
+        pseudoFeedback = "✅ Struktur dasar OK, tambah IF";
+      } else {
+        pseudoScore = 10;
+        pseudoFeedback = "❌ Perbaiki struktur dasar";
+      }
     }
 
     // ================= FLOWCHART VALIDATION =================
@@ -939,13 +954,15 @@ END`;
         
         if (conditions.length > 0) {
           const userCond = normalize(conditions[0].condition || "");
-          if (userCond.includes("angka > 0") || userCond.includes(">")) {
+          console.log("🔍 USER COND NORM:", `"${userCond}"`);
+          
+          if (userCond.includes("angka > 0") || userCond.includes("> 0") || userCond.includes(">0")) {
             flowScore = 50;
             flowMatch = true;
-            flowFeedback = "✅ Flowchart BENAR!";
+            flowFeedback = "✅ Kondisi flowchart BENAR!";
           } else {
             flowScore = 25;
-            flowFeedback = "⚠️ Kondisi kurang tepat";
+            flowFeedback = `⚠️ Kondisi: "${userCond}" ≠ "angka > 0"`;
           }
         } else {
           flowFeedback = "❌ Belum ada kondisi";
@@ -957,10 +974,10 @@ END`;
     }
 
     // ================= FINAL SCORE =================
-    const totalScore = pseudoScore + flowScore;
+    const totalScore = Math.round(pseudoScore + flowScore);
     const isValid = totalScore >= 90;
 
-    console.log(`🎯 PSEUDO: ${pseudoScore} | FLOW: ${flowScore} | TOTAL: ${totalScore} | VALID: ${isValid}`);
+    console.log(`🎯 FINAL: PSEUDO=${pseudoScore} | FLOW=${flowScore} | TOTAL=${totalScore} | VALID=${isValid}`);
 
     res.json({
       valid: isValid,
@@ -971,9 +988,11 @@ END`;
           match: pseudoMatch,
           score: pseudoScore,
           feedback: pseudoFeedback,
+          userRaw: userRaw,
           userNormalized: userPseudo,
           answerNormalized: answerPseudo,
-          rawUser: userRaw.substring(0, 100) + "..."
+          similarity: `${similarity(userPseudo, answerPseudo).toFixed(1)}%`,
+          hasBlanks: userRaw.includes('___BLANK') || userRaw.includes('[BLANK')
         },
         flowchart: {
           match: flowMatch,
