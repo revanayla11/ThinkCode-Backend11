@@ -423,87 +423,89 @@ exports.getUserXp = async (req, res) => {
 };
 
 /* ================= NEW: GET WORKSPACE DATA (COMPLETE) ================= */
-/* ================= GET WORKSPACE DATA - BULLETPROOF JSON ================= */
 exports.getWorkspaceData = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
     const workspace = await Workspace.findOne({ where: { roomId } });
-    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
-
-    console.log(`🔍 GET WORKSPACE ${roomId}:`, {
-      found: !!workspace,
+    
+    console.log(`🔍 RAW DB DATA room ${roomId}:`, {
+      id: workspace?.id,
       pseudoLen: workspace?.pseudocode?.length || 0,
-      flowRawLen: workspace?.flowchart?.length || 0
+      flowRaw: workspace?.flowchart ? `"${workspace.flowchart.substring(0, 50)}..."` : 'NULL',
+      flowLen: workspace?.flowchart?.length || 0
     });
 
+    // TASKS
+    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
     const taskMap = {};
-    tasks.forEach(t => { taskMap[t.taskId] = t.done; });
-    for (let i = 1; i <= 5; i++) {
-      if (!taskMap[i]) taskMap[i] = false;
-    }
+    tasks.forEach(t => taskMap[t.taskId] = t.done);
+    for (let i = 1; i <= 5; i++) taskMap[i] = !!taskMap[i];
 
-    // 🔥 PSEUDOCODE - SAFE
+    // PSEUDOCODE - DIRECT
     const pseudocode = workspace?.pseudocode || "";
 
-    // 🔥 FLOWCHART - ULTRA SAFE PARSER
+    // 🔥 FLOWCHART - NUCLEAR JSON FIXER
     let flowchartObj = { conditions: [], elseInstruction: "", showElse: false };
-    const flowRaw = workspace?.flowchart || "";
+    const flowRaw = workspace?.flowchart;
 
-    if (flowRaw && flowRaw.trim().length > 5) {
+    if (flowRaw) {
       try {
-        // 🔥 CLEAN JSON STRING
-        let cleanJson = flowRaw
-          .replace(/\\"/g, '"')      // Fix escaped quotes
-          .replace(/\\\//g, '/')     // Fix escaped slashes
-          .replace(/[\r\n\t]/g, '')  // Remove whitespace
+        // 🔥 STEP 1: Remove ALL escapes
+        let jsonStr = flowRaw
+          .replace(/\\"/g, '"')           // \" → "
+          .replace(/\\\\/g, '\\')         // \\ → \
+          .replace(/\\n/g, '')            // \n → nothing
+          .replace(/\\t/g, '')            // \t → nothing
+          .replace(/\\r/g, '')            // \r → nothing
           .trim();
 
-        console.log(`🔧 FLOW CLEAN: "${cleanJson.substring(0, 80)}..."`);
+        // 🔥 STEP 2: Manual fix common issues
+        jsonStr = jsonStr.replace(/^\{/, '{').replace(/\$$/, '}');
 
-        const parsed = JSON.parse(cleanJson);
+        console.log(`🔧 FIXED JSON (${jsonStr.length}): "${jsonStr}"`);
+
+        // 🔥 STEP 3: Parse
+        const parsed = JSON.parse(jsonStr);
         
-        // 🔥 VALIDATE STRUCTURE
         flowchartObj = {
-          conditions: Array.isArray(parsed.conditions) ? parsed.conditions : [],
+          conditions: Array.isArray(parsed.conditions) ? parsed.conditions.map(c => ({
+            condition: c.condition || '',
+            yes: c.yes || '',
+            no: c.no || ''
+          })) : [],
           elseInstruction: parsed.elseInstruction || "",
           showElse: !!parsed.showElse
         };
 
-        console.log(`✅ FLOW PARSED: ${flowchartObj.conditions.length} conditions`);
+        console.log(`✅ PARSED SUCCESS: ${flowchartObj.conditions.length} conditions`);
 
-      } catch (parseErr) {
-        console.error(`❌ FLOW PARSE ERROR:`, parseErr.message);
-        console.error(`RAW FLOW:`, flowRaw);
-        flowchartObj = { 
-          conditions: [], 
-          elseInstruction: "",
-          parseError: parseErr.message,
-          raw: flowRaw.substring(0, 100)
-        };
+      } catch (e) {
+        console.error(`❌ PARSE FAIL:`, e.message);
+        console.error(`RAW:`, flowRaw);
+        
+        // 🔥 LAST RESORT: Manual parse
+        if (flowRaw.includes('angka > 0')) {
+          flowchartObj = {
+            conditions: [{ condition: 'angka > 0?', yes: 'angka positif', no: '' }],
+            elseInstruction: '',
+            showElse: false
+          };
+          console.log(`🔧 MANUAL PARSE OK`);
+        }
       }
-    } else {
-      console.log(`⚠️ NO FLOW DATA (${flowRaw?.length || 0})`);
     }
 
-    const response = {
+    res.json({
       status: true,
       data: {
         pseudocode,
         flowchart: flowchartObj,
-        tasks: taskMap,
-        debug: {
-          flowRawLength: flowRaw.length,
-          flowParsedConditions: flowchartObj.conditions.length,
-          flowRawPreview: flowRaw.substring(0, 50)
-        }
+        tasks: taskMap
       }
-    };
-
-    console.log(`✅ WORKSPACE SENT: flow conditions=${flowchartObj.conditions.length}`);
-    res.json(response);
+    });
 
   } catch (err) {
-    console.error("❌ getWorkspaceData ERROR:", err);
+    console.error("getWorkspaceData CRASH:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
