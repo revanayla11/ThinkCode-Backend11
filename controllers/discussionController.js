@@ -796,14 +796,15 @@ exports.validateWorkspace = async (req, res) => {
       where: { materiId: room.materiId }
     });
 
+    // 🔥 NORMALIZE LEBIH AMAN
     const normalize = (text) =>
       text
         ?.toLowerCase()
         .replace(/\s+/g, " ")
-        .replace(/[^a-z0-9<>=! ]/g, "")
+        .replace(/[()"]/g, "") // ❗ jangan hapus > < = !
         .trim();
 
-    // 🔥 PSEUDOCODE
+    /* ================= PSEUDOCODE ================= */
     let pseudoScore = 0;
     let pseudoMatch = false;
 
@@ -811,18 +812,25 @@ exports.validateWorkspace = async (req, res) => {
       const userPseudo = normalize(workspace.pseudocode);
       const correctPseudo = normalize(answer.pseudocode);
 
-      const similarity =
-        userPseudo === correctPseudo
-          ? 100
-          : userPseudo.includes(correctPseudo)
-          ? 80
-          : 50;
+      console.log("USER:", userPseudo);
+      console.log("CORRECT:", correctPseudo);
 
-      pseudoScore = similarity >= 80 ? 50 : 0;
-      pseudoMatch = similarity >= 80;
+      // 🔥 FLEXIBLE MATCH
+      if (userPseudo === correctPseudo) {
+        pseudoScore = 50;
+        pseudoMatch = true;
+      } else if (
+        userPseudo.includes(correctPseudo) ||
+        correctPseudo.includes(userPseudo)
+      ) {
+        pseudoScore = 50;
+        pseudoMatch = true;
+      } else {
+        pseudoScore = 0;
+      }
     }
 
-    // 🔥 FLOWCHART
+    /* ================= FLOWCHART ================= */
     let flowScore = 0;
     let flowMatch = false;
 
@@ -835,10 +843,36 @@ exports.validateWorkspace = async (req, res) => {
       const correctFlow = answer?.flowchart;
 
       if (userFlow && correctFlow) {
-        const userConditions = userFlow.conditions?.length || 0;
-        const correctConditions = correctFlow.conditions?.length || 0;
+        const userConditions = userFlow.conditions || [];
+        const correctConditions = correctFlow.conditions || [];
 
-        if (userConditions === correctConditions) {
+        // 🔥 CEK JUMLAH + ISI
+        if (userConditions.length === correctConditions.length) {
+          let matchCount = 0;
+
+          userConditions.forEach((cond, i) => {
+            const userCond = normalize(cond.condition);
+            const correctCond = normalize(correctConditions[i].condition);
+
+            if (
+              userCond === correctCond ||
+              userCond.includes(correctCond)
+            ) {
+              matchCount++;
+            }
+          });
+
+          if (matchCount === correctConditions.length) {
+            flowScore = 50;
+            flowMatch = true;
+          }
+        }
+
+        // 🔥 BONUS: cek ELSE
+        const userElse = normalize(userFlow.elseInstruction || "");
+        const correctElse = normalize(correctFlow.elseInstruction || "");
+
+        if (correctElse && userElse === correctElse) {
           flowScore = 50;
           flowMatch = true;
         }
@@ -847,6 +881,7 @@ exports.validateWorkspace = async (req, res) => {
       console.log("Flow error:", err.message);
     }
 
+    /* ================= FINAL ================= */
     const totalScore = pseudoScore + flowScore;
 
     res.json({
