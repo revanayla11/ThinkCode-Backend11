@@ -7,8 +7,8 @@ const verifyToken = require("../middleware/verifyToken");
 console.log("Controller loaded:", Object.keys(materiController));
 
 // Routes
-router.get("/", materiController.listMateri);           // Pastikan ada di controller
-router.get("/:id", materiController.getMateriDetail);   // Pastikan ada di controller
+router.get("/", verifyToken, materiController.listMateri);           // Pastikan ada di controller
+router.get("/:id", verifyToken, materiController.getMateriDetail);   // Pastikan ada di controller
 router.post("/:id/progress", verifyToken, materiController.updateProgress);
 router.post("/:id/complete-step", verifyToken, materiController.completeStep);
 
