@@ -636,118 +636,118 @@ const fillBlanks = (template, answers) => {
   return filled;
 };
 /* ================= SAVE FLOWCHART ================= */
+/* ================= SAVE FLOWCHART - BULLETPROOF VERSION ================= */
 exports.saveFlowchart = async (req, res) => {
-  const transaction = await Workspace.sequelize.transaction();
-  console.log('🔥 Workspace model:', Workspace);
-console.log('🔥 Sequelize:', Workspace.sequelize);
+  const transaction = await Workspace.sequelize.transaction(); // 🔥 TAMBAH TRANSACTION
   try {
-    console.log(`🔧 SAVE FLOW ${req.params.roomId} START`);
+    console.log(`🔧 SAVE FLOW ${req.params.roomId} - TX MODE`);
     
     const roomId = parseInt(req.params.roomId);
     let { flowchart } = req.body;
 
-    console.log(`📥 INPUT:`, JSON.stringify(flowchart, null, 2));
-
     // VALIDASI
-    if (!flowchart || !Array.isArray(flowchart.conditions) || flowchart.conditions.length === 0) {
+    if (!flowchart?.conditions?.[0]?.condition) {
       await transaction.rollback();
-      return res.status(400).json({ error: "No valid conditions" });
+      return res.status(400).json({ error: "No conditions" });
     }
 
     // CLEAN
-    const cleanFlowchart = {
-      conditions: flowchart.conditions
-        .map(c => ({
-          condition: (c.condition || '').toString().trim(),
-          yes: (c.yes || '').toString().trim(),
-          no: (c.no || '').toString().trim()
-        }))
-        .filter(c => c.condition.length > 0),
-      elseInstruction: (flowchart.elseInstruction || '').toString().trim(),
+    const cleanFlow = {
+      conditions: flowchart.conditions.map(c => ({
+        condition: String(c.condition || '').trim(),
+        yes: String(c.yes || '').trim(),
+        no: String(c.no || '').trim()
+      })).filter(c => c.condition),
+      elseInstruction: String(flowchart.elseInstruction || '').trim(),
       showElse: !!flowchart.showElse
     };
 
-    if (cleanFlowchart.conditions.length === 0) {
-      await transaction.rollback();
-      return res.status(400).json({ error: "All conditions empty" });
+    const jsonString = JSON.stringify(cleanFlow);
+    console.log(`📝 JSON OK (${jsonString.length}):`, jsonString.substring(0, 100));
+
+    // 🔥 1. GET/CREATE WORKSPACE - BULLETPROOF
+    let workspace = await Workspace.findOne({ where: { roomId }, transaction });
+    
+    // ✅ CREATE IF NOT EXISTS
+    if (!workspace) {
+      workspace = await Workspace.create({ 
+        roomId, 
+        pseudocode: "", 
+        flowchart: "" 
+      }, { transaction });
+      console.log("✅ NEW WORKSPACE CREATED");
     }
 
-    const jsonString = JSON.stringify(cleanFlowchart);
-    console.log(`📝 JSON (${jsonString.length}):`, jsonString);
+    const pseudo = workspace.pseudocode || ""; // ✅ SAFE NOW
 
-    // GET PSEUDO
-    const existing = await Workspace.findOne({ where: { roomId }, transaction });
-    const preservedPseudo = existing?.pseudocode || '';
-
-    console.log(`💾 Pseudo preserved: ${preservedPseudo ? 'YES' : 'NO'}`);
-
-    // 🔥 UPSERT - SIMPLE & DIRECT
-    const [result] = await Workspace.upsert({
+    // 🔥 2. UPSERT - FULL SAFE
+    const [updatedRows] = await Workspace.upsert({
       roomId,
-      pseudocode: preservedPseudo,
-      flowchart: jsonString
+      pseudocode: pseudo || "",           // ✅ NULL-SAFE
+      flowchart: jsonString               // ✅ VALID JSON
     }, { 
       transaction,
-      logging: false  // No spam
+      returning: true                     // 🔥 GET UPDATED DATA
     });
 
-    console.log(`✅ UPSERT OK:`, result.id);
+    console.log(`✅ UPSERT: rows=${updatedRows}, flowLen=${jsonString.length}`);
 
-    // 🔥 VERIFY CRITICAL
+    // 🔥 3. VERIFY IMMEDIATE
     const verified = await Workspace.findOne({ where: { roomId }, transaction });
-    
     console.log(`🔍 VERIFY:`, {
-      flowchart: verified.flowchart ? `${verified.flowchart.length} chars` : 'NULL',
-      preview: verified.flowchart?.substring(0, 50),
-      nullCheck: verified.flowchart === null
+      exists: !!verified,
+      flowLen: verified?.flowchart?.length || 0,
+      flowPreview: verified?.flowchart?.substring(0, 50),
+      pseudoLen: verified?.pseudocode?.length || 0
     });
 
-    if (!verified.flowchart || verified.flowchart.length === 0) {
+    if (!verified?.flowchart || verified.flowchart.length < 10) {
       await transaction.rollback();
       return res.status(500).json({ 
         error: "VERIFY FAILED - flowchart NULL after upsert!",
-        debug: { jsonString, verified: verified.flowchart }
+        debug: { roomId, jsonLen: jsonString.length, verified: !!verified }
       });
     }
 
-    // ATTEMPT
+    // 🔥 4. ATTEMPT COUNT
     const attemptCount = await WorkspaceAttempt.count({ 
       where: { roomId, type: "flowchart" }, 
       transaction 
     });
     await WorkspaceAttempt.create({
-      roomId,
-      type: "flowchart",
-      attemptNumber: attemptCount + 1,
+      roomId, 
+      type: "flowchart", 
+      attemptNumber: attemptCount + 1, 
       content: jsonString
     }, { transaction });
 
-    // TASK
+    // 🔥 5. TASK PROGRESS
     await RoomTaskProgress.upsert({ 
-      roomId, taskId: 4, done: true 
+      roomId, 
+      taskId: 4, 
+      done: true 
     }, { transaction });
 
     await transaction.commit();
-    
-    console.log(`🎉 FULL SUCCESS - ${cleanFlowchart.conditions.length} conditions`);
+    console.log(`🎉 FULL SUCCESS! flowLen=${verified.flowchart.length}`);
 
     res.json({
       status: true,
-      message: `✅ Flowchart saved! (${cleanFlowchart.conditions.length} conditions)`,
+      message: `✅ Saved ${cleanFlow.conditions.length} conditions`,
       debug: { 
-        conditions: cleanFlowchart.conditions.length,
-        jsonLength: jsonString.length,
-        verifiedLength: verified.flowchart.length
+        length: verified.flowchart.length,
+        conditions: cleanFlow.conditions.length,
+        pseudoPreserved: !!pseudo
       }
     });
 
   } catch (error) {
     await transaction.rollback();
-    console.error(`💥 saveFlowchart ERROR:`, error.message);
-    console.error(`STACK:`, error.stack);
+    console.error(`💥 CRASH:`, error);
+    console.error(`REQ BODY:`, req.body);
     res.status(500).json({ 
       error: error.message,
-      debug: req.body 
+      debug: { roomId: req.params.roomId }
     });
   }
 };
@@ -1648,6 +1648,29 @@ exports.debugRoom = async (req, res) => {
   } catch (error) {
     console.error("debugRoom error:", error);
     res.status(500).json({ status: false, message: error.message });
+  }
+};
+// 🔥 DEBUG ENDPOINT - CEK DATABASE
+exports.debugWorkspace = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const ws = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
+    
+    res.json({
+      roomId,
+      workspace: ws ? {
+        id: ws.id,
+        pseudocode: ws.pseudocode ? `${ws.pseudocode.substring(0, 50)}... (${ws.pseudocode.length})` : 'NULL',
+        flowchart: ws.flowchart ? `${ws.flowchart.substring(0, 50)}... (${ws.flowchart.length})` : 'NULL',
+        createdAt: ws.createdAt
+      } : 'NOT FOUND',
+      rawTypes: {
+        pseudoType: typeof ws?.pseudocode,
+        flowType: typeof ws?.flowchart
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 module.exports = exports;

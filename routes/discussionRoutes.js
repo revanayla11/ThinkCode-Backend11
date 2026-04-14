@@ -50,5 +50,7 @@ router.get('/template-dynamic/:materiId', discussionController.getDynamicTemplat
 
 router.post('/room/:roomId/debug', auth, verifyToken, discussionController.debugRoom);
 router.get('/room/:roomId/debug-validation', auth, verifyToken, discussionController.debugValidation);
+// routes/discussion.js
+router.get('/room/:roomId/debug-workspace', verifyToken, discussionController.debugWorkspace);
 module.exports = router;
 
