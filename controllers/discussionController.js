@@ -1500,4 +1500,29 @@ exports.debugRoom = async (req, res) => {
     res.status(500).json({ status: false, message: error.message });
   }
 };
+
+// Tambah di akhir sebelum module.exports
+exports.saveFlowchart = async (req, res) => {
+  try {
+    const roomId = parseInt(req.params.roomId);
+    const { flowchart } = req.body;
+    
+    console.log(`💾 SAVE FLOWCHART room ${roomId}`);
+    
+    const cleanFlow = JSON.stringify(flowchart);
+    
+    await Workspace.upsert({
+      roomId,
+      flowchart: cleanFlow
+    });
+    
+    res.json({ status: true, message: "Flowchart saved!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.validateWorkspace = async (req, res) => {
+  // Copy self-contained version dari atas
+};
 module.exports = exports;
