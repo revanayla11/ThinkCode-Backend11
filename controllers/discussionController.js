@@ -1082,52 +1082,6 @@ END`;
   }
 };
 
-// 🔥 VALIDASI YANG PALING SIMPEL & AKURAT
-const checkKeyElements = (user, answer) => {
-  console.log("🔍 USER:", `"${user}"`);
-  console.log("🔍 ANSWER:", `"${answer}"`);
-  
-  // Split jadi kata-kata
-  const userWords = user.split(' ').filter(w => w.length > 2);
-  const answerWords = answer.split(' ');
-  
-  // Kata wajib (case insensitive)
-  const requiredWords = ['deklarasi', 'algoritma', 'read', 'if', 'write', 'endif', 'end'];
-  const hasRequired = requiredWords.every(word => user.includes(word));
-  
-  // Kata spesifik materi
-  const materiWords = {
-    1: ['angka', '>0', 'positif'],
-    2: ['nilai', '>=70', 'lulus'],
-    3: ['umur', '<=12', 'kategori']
-  };
-  
-  const materiNum = room?.materiId || 1;
-  const specificWords = materiWords[materiNum] || ['angka', '>0'];
-  const hasSpecific = specificWords.some(word => user.includes(word));
-  
-  let score = 0;
-  
-  // Basic structure (50%)
-  if (user.includes('deklarasi') && user.includes('algoritma')) score += 20;
-  if (user.includes('read')) score += 10;
-  if (user.includes('if')) score += 10;
-  if (user.includes('write')) score += 10;
-  
-  // Specific content (30%)
-  if (hasSpecific) score += 30;
-  
-  // Closing (20%)
-  if (user.includes('endif') || user.includes('end')) score += 20;
-  
-  // Bonus: word match
-  const matchedWords = userWords.filter(word => answerWords.includes(word)).length;
-  score += Math.min((matchedWords / answerWords.length) * 20, 20);
-  
-  console.log(`📊 SCORE BREAKDOWN: ${score}% | Required: ${hasRequired} | Specific: ${hasSpecific}`);
-  
-  return Math.min(100, score);
-};
 
 // Buat endpoint baru untuk template dinamis
 // 🔥 FULL DYNAMIC TEMPLATE - discussionController.js
