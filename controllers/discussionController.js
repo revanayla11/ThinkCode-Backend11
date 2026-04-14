@@ -575,69 +575,108 @@ const fillBlanks = (template, answers) => {
   return filled;
 };
 /* ================= SAVE FLOWCHART ================= */
+/* ================= SAVE FLOWCHART - BULLETPROOF VERSION ================= */
 exports.saveFlowchart = async (req, res) => {
   const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
     let { flowchart } = req.body;
 
-    console.log(`🔧 [SAVE FLOWCHART ${roomId}] Raw:`, JSON.stringify(flowchart)?.slice(0, 200));
+    console.log(`🔧 [SAVE FLOW ${roomId}] RAW BODY:`, JSON.stringify(req.body, null, 2));
+    
+    // 🔥 VALIDASI INPUT
+    if (!flowchart) {
+      return res.status(400).json({ error: "No flowchart data received" });
+    }
 
-    // Parse & validate (sama seperti sebelumnya)
+    // 🔥 PARSE & CLEAN
     if (typeof flowchart === 'string') {
       flowchart = JSON.parse(flowchart);
     }
 
-    if (!flowchart?.conditions?.length) {
-      return res.status(400).json({ error: "Minimal 1 kondisi" });
+    if (!Array.isArray(flowchart.conditions) || flowchart.conditions.length === 0) {
+      return res.status(400).json({ error: "Minimal 1 kondisi diperlukan" });
     }
 
+    // 🔥 CLEAN DATA
     const cleanFlowchart = {
-      conditions: flowchart.conditions.map(c => ({
-        condition: (c.condition || '').trim(),
-        yes: (c.yes || '').trim(),
-        no: c.no?.trim() || ''
-      })).filter(c => c.condition),
+      conditions: flowchart.conditions
+        .map(c => ({
+          condition: (c.condition || '').trim(),
+          yes: (c.yes || '').trim(),
+          no: (c.no || '').trim()
+        }))
+        .filter(c => c.condition.length > 0), // Hapus kondisi kosong
       elseInstruction: (flowchart.elseInstruction || '').trim(),
       showElse: !!flowchart.showElse
     };
 
-    // 🔥 CRITICAL FIX: GET EXISTING WORKSPACE FIRST
+    console.log(`✅ CLEANED FLOW:`, {
+      conditions: cleanFlowchart.conditions.length,
+      firstCond: cleanFlowchart.conditions[0]?.condition,
+      showElse: cleanFlowchart.showElse
+    });
+
+    // 🔥 GET EXISTING - PRESERVE PSEUDOCODE
     const existing = await Workspace.findOne({ where: { roomId }, transaction });
-    const pseudocode = existing?.pseudocode || ""; // PRESERVE PSEUDOCODE!
+    const preservedPseudocode = existing?.pseudocode || null;
 
-    console.log(`📊 Existing pseudo len: ${pseudocode.length}, flow conditions: ${cleanFlowchart.conditions.length}`);
+    console.log(`🔍 BEFORE - Pseudo preserved: ${!!preservedPseudocode} (${preservedPseudocode?.length || 0})`);
 
-    // 🔥 UPSERT with BOTH fields
+    // 🔥 SAVE - FULL UPSERT
     await Workspace.upsert({
       roomId,
-      pseudocode: pseudocode,        // ✅ PRESERVE
+      pseudocode: preservedPseudocode,  // ✅ PRESERVE
       flowchart: JSON.stringify(cleanFlowchart)  // ✅ NEW
     }, { transaction });
 
-    // Save attempt
+    // 🔥 SAVE ATTEMPT
+    const attemptCount = await WorkspaceAttempt.count({
+      where: { roomId, type: "flowchart" },
+      transaction
+    });
+    
     await WorkspaceAttempt.create({
-      roomId, type: "flowchart", 
-      attemptNumber: (await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" }, transaction })) + 1,
+      roomId,
+      type: "flowchart",
+      attemptNumber: attemptCount + 1,
       content: JSON.stringify(cleanFlowchart)
     }, { transaction });
 
-    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
-    
+    // 🔥 TASK PROGRESS
+    await RoomTaskProgress.upsert({
+      roomId,
+      taskId: 4,
+      done: true
+    }, { transaction });
+
+    // 🔥 VERIFY SAVE
+    const verified = await Workspace.findOne({ where: { roomId }, transaction });
+    console.log(`✅ VERIFIED SAVE:`, {
+      pseudoLen: verified.pseudocode?.length || 0,
+      flowLen: verified.flowchart?.length || 0,
+      flowPreview: verified.flowchart?.substring(0, 100)
+    });
+
     await transaction.commit();
 
-    console.log(`💾 [SUCCESS ${roomId}] Flowchart saved! Conditions: ${cleanFlowchart.conditions.length}`);
-    
-    res.json({ 
-      status: true, 
-      message: `✅ Flowchart tersimpan (${cleanFlowchart.conditions.length} kondisi)!`,
-      data: { conditions: cleanFlowchart.conditions.length }
+    res.json({
+      status: true,
+      message: `✅ Flowchart tersimpan! (${cleanFlowchart.conditions.length} kondisi)`,
+      data: {
+        conditions: cleanFlowchart.conditions.length,
+        preservedPseudocode: !!preservedPseudocode,
+        attempts: attemptCount + 1
+      }
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("❌ saveFlowchart:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ saveFlowchart FULL ERROR:", err);
+    res.status(500).json({ 
+      error: err.message,
+      debug: req.body 
+    });
   }
 };
 /* ================= GET WORKSPACE ================= */
