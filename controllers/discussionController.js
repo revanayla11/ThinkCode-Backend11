@@ -837,7 +837,7 @@ exports.validateWorkspace = async (req, res) => {
     const { roomId } = req.params;
     const safeRoomId = parseInt(roomId);
     
-    console.log(`🔍 VALIDATE roomId: ${safeRoomId}`);
+    console.log(`🔍 [VALIDATE v2] Room ${safeRoomId}`);
 
     const room = await DiscussionRoom.findByPk(safeRoomId);
     if (!room) return res.status(404).json({ valid: false, score: 0, error: "Room not found" });
@@ -845,65 +845,54 @@ exports.validateWorkspace = async (req, res) => {
     const workspace = await Workspace.findOne({ where: { roomId: safeRoomId } });
     if (!workspace) return res.json({ valid: false, score: 0, message: "Workspace kosong" });
 
-    const materiId = parseInt(room.materiId || 1);
-
-    // PSEUDOCODE
+    // PSEUDOCODE - INLINE VALIDATION
     let pseudoScore = 0;
-    if (workspace.pseudocode?.trim()) {
-      const userClean = normalize(workspace.pseudocode);
-      const expected = normalize(getExpectedAnswer(materiId));
-      const keywords = ['deklarasi', 'algoritma', 'read', 'if', 'write', 'endif'];
-      const matches = keywords.filter(kw => userClean.includes(kw));
-      pseudoScore = Math.min(100, (matches.length / keywords.length) * 80);
+    const pseudo = workspace.pseudocode || "";
+    if (pseudo.trim()) {
+      const clean = pseudo.toLowerCase().replace(/\s+/g, ' ').trim();
+      const hasDeklarasi = clean.includes('deklarasi');
+      const hasAlgoritma = clean.includes('algoritma');
+      const hasRead = clean.includes('read');
+      const hasIf = clean.includes('if');
+      const hasWrite = clean.includes('write');
+      
+      pseudoScore = 0;
+      if (hasDeklarasi) pseudoScore += 20;
+      if (hasAlgoritma) pseudoScore += 20;
+      if (hasRead) pseudoScore += 15;
+      if (hasIf) pseudoScore += 15;
+      if (hasWrite) pseudoScore += 15;
+      if (clean.includes('> 0') || clean.includes('positif')) pseudoScore += 15;
     }
 
-    // 🔥 FLOWCHART - ULTRA SAFE PARSING
-    let flowScore = 0, flowFeedback = "Belum ada flowchart";
-    const flowRaw = workspace.flowchart;
-    
-    console.log(`🔄 Flow raw type: ${typeof flowRaw}, len: ${flowRaw?.length}, preview: "${flowRaw?.slice(0, 50)}..."`);
+    // FLOWCHART - ULTRA SAFE
+    let flowScore = 0;
+    const flowRaw = workspace.flowchart || "";
+    console.log(`🔄 Flow raw (${flowRaw.length}): ${flowRaw.slice(0, 50)}`);
 
-    if (flowRaw && flowRaw.trim().length > 10) {  // Minimal JSON length
+    if (flowRaw.trim()) {
       try {
-        let flowObj;
+        // Fix double-escaped JSON
+        let jsonStr = flowRaw.replace(/\\"/g, '"');
+        const flow = JSON.parse(jsonStr);
         
-        // 🔥 CASE 1: Already object
-        if (typeof flowRaw === 'object') {
-          flowObj = flowRaw;
-        } 
-        // 🔥 CASE 2: JSON string (escaped)
-        else if (typeof flowRaw === 'string') {
-          // Unescape double quotes first
-          const unescaped = flowRaw.replace(/\\"/g, '"');
-          console.log(`🔧 Unescaped: "${unescaped.slice(0, 50)}..."`);
-          flowObj = JSON.parse(unescaped);
+        console.log(`✅ Flow parsed: conditions=${flow.conditions?.length}`);
+        
+        if (Array.isArray(flow.conditions) && flow.conditions.length > 0) {
+          const cond = flow.conditions[0];
+          flowScore = 50;
+          if (cond.condition?.includes('>')) flowScore += 25;
+          if (cond.yes?.trim()) flowScore += 25;
         }
-        
-        console.log(`✅ PARSED FLOW:`, flowObj);
-
-        const conditions = Array.isArray(flowObj?.conditions) ? flowObj.conditions : [];
-        
-        if (conditions.length > 0) {
-          const firstCond = (conditions[0].condition || '').toLowerCase().trim();
-          const hasYes = !!(conditions[0].yes?.trim());
-          
-          flowScore = 40;
-          if (firstCond.includes('> 0') || firstCond.includes('positif') || firstCond.includes('>')) flowScore += 30;
-          if (hasYes) flowScore += 30;
-          
-          flowFeedback = `✅ ${conditions.length} kondisi (${firstCond})`;
-        }
-      } catch (parseErr) {
-        console.error(`❌ PARSE ERROR: ${parseErr.message}`);
-        console.error(`Raw flowchart:`, flowRaw);
-        flowFeedback = "❌ JSON rusak";
+      } catch (e) {
+        console.error(`❌ Flow parse: ${e.message}`);
       }
     }
 
     const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
     const valid = totalScore >= 75;
 
-    console.log(`📊 RESULT: Pseudo:${pseudoScore} Flow:${flowScore} Total:${totalScore}%`);
+    console.log(`📊 FINAL: Pseudo=${pseudoScore} Flow=${flowScore} Total=${totalScore}`);
 
     res.json({
       valid,
@@ -912,19 +901,19 @@ exports.validateWorkspace = async (req, res) => {
         pseudocode: {
           match: pseudoScore >= 80,
           score: pseudoScore,
-          feedback: pseudoScore >= 80 ? "✅ Perfect!" : "⚠️ Perbaiki"
+          feedback: pseudoScore >= 80 ? "✅ Perfect pseudocode!" : "⚠️ Check structure"
         },
         flowchart: {
           match: flowScore >= 80,
           score: flowScore,
-          feedback: flowFeedback,
-          rawPreview: flowRaw?.slice(0, 50) + "..."
+          feedback: flowScore > 0 ? "✅ Flowchart OK!" : "❌ No flowchart data",
+          rawLength: flowRaw.length
         }
       }
     });
 
   } catch (error) {
-    console.error("VALIDATE ERROR:", error);
+    console.error("❌ VALIDATE ERROR:", error.message);
     res.status(500).json({ valid: false, score: 0, error: error.message });
   }
 };
