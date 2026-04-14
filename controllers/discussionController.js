@@ -427,24 +427,38 @@ exports.getWorkspaceData = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
 
-    const workspace = await Workspace.findOne({
-      where: { roomId }
-    });
-
+    const workspace = await Workspace.findOne({ where: { roomId } });
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
 
     const taskMap = {};
     tasks.forEach(t => { taskMap[t.taskId] = t.done; });
-
     for (let i = 1; i <= 5; i++) {
       if (!taskMap[i]) taskMap[i] = false;
     }
+
+    // 🔥 FIX: SELALU PARSE JSON KE OBJECT
+    let flowchartObj = { conditions: [], elseInstruction: "" };
+    if (workspace?.flowchart) {
+      try {
+        flowchartObj = typeof workspace.flowchart === 'string' 
+          ? JSON.parse(workspace.flowchart) 
+          : workspace.flowchart;
+      } catch (e) {
+        console.error("Flowchart parse error:", e);
+      }
+    }
+
+    console.log("🔄 Workspace data:", {
+      pseudocode: workspace?.pseudocode ? 'OK' : 'EMPTY',
+      flowchart: flowchartObj,
+      conditionsCount: flowchartObj.conditions?.length || 0
+    });
 
     res.json({
       status: true,
       data: {
         pseudocode: workspace?.pseudocode || "",
-        flowchart: workspace?.flowchart || { conditions: [], elseInstruction: "" },
+        flowchart: flowchartObj,  // ✅ SELALU OBJECT
         tasks: taskMap
       }
     });
@@ -473,6 +487,7 @@ exports.getTaskProgress = async (req, res) => {
 };
 
 /* ================= SAVE PSEUDOCODE - FIXED ================= */
+/* ================= SAVE PSEUDOCODE ================= */
 exports.savePseudocode = async (req, res) => {
   const transaction = await Workspace.sequelize.transaction();
   try {
@@ -481,34 +496,38 @@ exports.savePseudocode = async (req, res) => {
     const userId = req.user.id;
 
     console.log(`💾 savePseudocode room ${roomId}`);
+    console.log(`📝 Raw input (${pseudocode?.length || 0} chars):`, pseudocode?.substring(0, 200));
 
     if (!pseudocode?.trim()) {
+      await transaction.rollback();
       return res.status(400).json({ status: false, message: "Pseudocode kosong" });
     }
 
-    // 🔥 CRITICAL FIX: HAPUS SEMUA [BLANK X] DAN ___BLANK_X___
-    pseudocode = pseudocode
-      .replace(/\$\s*BLANK\s*\d+\s*\$/gi, '')  // Hapus [BLANK 1], [BLANK 5], etc
-      .replace(/___BLANK_\d+___/gi, '')       // Hapus ___BLANK_0___
+    // 🔥 CRITICAL FIX: HAPUS SEMUA BLANK PLACEHOLDER
+    const cleaned = pseudocode
+      .replace(/\$BLANK\s*\d+\$/gi, '')           // [BLANK 1], [BLANK 5]
+      .replace(/___BLANK_\d+___/gi, '')           // ___BLANK_0___
+      .replace(/\s+/g, ' ')                       // Normalize spaces
       .trim();
 
-    console.log("🔧 CLEANED PSEUDOCODE:", pseudocode);
+    console.log(`✅ CLEANED PSEUDOCODE (${cleaned.length} chars):`, `"${cleaned}"`);
 
     // Hitung attempts
     const attemptCount = await WorkspaceAttempt.count({
-      where: { roomId, type: "pseudocode" }
+      where: { roomId, type: "pseudocode" },
+      transaction
     });
 
-    // NEW ATTEMPT
+    // 🔥 NEW ATTEMPT
     await WorkspaceAttempt.create({
       roomId,
       type: "pseudocode",
       attemptNumber: attemptCount + 1,
-      content: pseudocode,  // Simpan yang sudah bersih
+      content: cleaned,
       userId
     }, { transaction });
 
-    // XP PENALTY
+    // XP PENALTY - mulai attempt 6+
     if (attemptCount + 1 > 5) {
       const penalty = 10;
       const room = await DiscussionRoom.findByPk(roomId, { transaction });
@@ -527,12 +546,13 @@ exports.savePseudocode = async (req, res) => {
           );
         }
       }
+      console.log(`⚠️ Penalty: -${penalty}XP x${members.length} members (attempt ${attemptCount + 1})`);
     }
 
-    // 🔥 SAVE CLEAN PSEUDOCODE
+    // Save workspace
     await Workspace.upsert({
       roomId,
-      pseudocode: pseudocode  // Yang sudah bersih!
+      pseudocode: cleaned
     }, { transaction });
 
     await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true }, { transaction });
@@ -542,56 +562,95 @@ exports.savePseudocode = async (req, res) => {
     res.json({ 
       status: true, 
       attempt: attemptCount + 1,
-      cleanedLength: pseudocode.length,
-      preview: pseudocode.substring(0, 100) + "...",
-      message: `✅ Saved! (Cleaned ${pseudocode.length} chars)`
+      cleanedLength: cleaned.length,
+      preview: cleaned.substring(0, 100) + "...",
+      message: `✅ Pseudocode saved! Attempt ${attemptCount + 1}`
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("savePseudocode ERROR:", err);
+    console.error("❌ savePseudocode ERROR:", err);
     res.status(500).json({ status: false, message: err.message });
   }
 };
-/* ================= SAVE FLOWCHART - UNLIMITED + XP PENALTY ================= */
-/* ================= SAVE FLOWCHART - PERMANENT FIX ================= */
+/* ================= SAVE FLOWCHART ================= */
 exports.saveFlowchart = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
     let { flowchart } = req.body;
 
-    console.log(`🔧 saveFlowchart room ${roomId}:`, typeof flowchart);
+    console.log(`🔧 saveFlowchart room ${roomId}`);
+    console.log("📥 Input type:", typeof flowchart);
+    console.log("📥 Input preview:", JSON.stringify(flowchart)?.substring(0, 200));
 
-    // 🔥 PERMANENT FIX: Handle string/object
+    // 🔥 HANDLE STRING/OBJECT
     if (typeof flowchart === 'string') {
-      flowchart = JSON.parse(flowchart);
+      try {
+        flowchart = JSON.parse(flowchart);
+        console.log("✅ Parsed from string to object");
+      } catch (e) {
+        return res.status(400).json({ 
+          status: false, 
+          message: `Invalid JSON: ${e.message}` 
+        });
+      }
     }
 
-    // Validasi minimal
-    if (!flowchart || !Array.isArray(flowchart.conditions) || flowchart.conditions.length === 0) {
+    // 🔥 VALIDASI
+    if (!flowchart || !Array.isArray(flowchart.conditions)) {
       return res.status(400).json({ 
         status: false, 
-        message: "Flowchart harus punya minimal 1 kondisi" 
+        message: `Flowchart invalid. Conditions: ${flowchart?.conditions?.length || 0}` 
       });
     }
 
-    // 🔥 UNLIMITED ATTEMPTS - HAPUS LIMIT
+    if (flowchart.conditions.length === 0) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "Minimal 1 kondisi diperlukan" 
+      });
+    }
+
+    // 🔥 CLEAN & VALIDATE DATA
+    const cleanFlowchart = {
+      conditions: flowchart.conditions
+        .map(cond => ({
+          condition: (cond.condition || '').trim(),
+          yes: (cond.yes || '').trim(),
+          no: cond.no?.trim() || ''
+        }))
+        .filter(cond => cond.condition.length > 0), // Hapus kosong
+      elseInstruction: (flowchart.elseInstruction || '').trim(),
+      showElse: !!flowchart.showElse
+    };
+
+    if (cleanFlowchart.conditions.length === 0) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "Semua kondisi kosong" 
+      });
+    }
+
+    console.log(`✅ CLEAN FLOWCHART: ${cleanFlowchart.conditions.length} conditions`);
+    console.log("Conditions preview:", cleanFlowchart.conditions.map(c => c.condition));
+
+    // Count attempts
     const attemptCount = await WorkspaceAttempt.count({
       where: { roomId, type: "flowchart" }
     });
-    
-    // Simpan attempt (no limit)
+
+    // Save attempt
     await WorkspaceAttempt.create({
       roomId,
       type: "flowchart",
       attemptNumber: attemptCount + 1,
-      content: JSON.stringify(flowchart)
+      content: JSON.stringify(cleanFlowchart)
     });
 
-    // 🔥 CRITICAL: SAVE AS JSON STRING ke DB
+    // 🔥 SAVE TO DB AS JSON STRING
     await Workspace.upsert({
       roomId,
-      flowchart: JSON.stringify(flowchart)  // ✅ STRING FORMAT
+      flowchart: JSON.stringify(cleanFlowchart)
     });
 
     await RoomTaskProgress.upsert({ 
@@ -600,14 +659,17 @@ exports.saveFlowchart = async (req, res) => {
       done: true 
     });
 
-    console.log(`✅ Flowchart SAVED room ${roomId}: ${flowchart.conditions.length} conditions`);
+    console.log(`💾 Flowchart SAVED to DB: ${cleanFlowchart.conditions.length} conditions`);
+    
     res.json({ 
       status: true, 
-      message: `Flowchart tersimpan! (${flowchart.conditions.length} kondisi)`
+      conditions: cleanFlowchart.conditions.length,
+      totalAttempts: attemptCount + 1,
+      message: `✅ Flowchart tersimpan! (${cleanFlowchart.conditions.length} kondisi)`
     });
 
   } catch (err) {
-    console.error("saveFlowchart ERROR:", err);
+    console.error("❌ saveFlowchart ERROR:", err);
     res.status(500).json({ 
       status: false, 
       message: err.message 
@@ -782,101 +844,155 @@ END`,
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
+    console.log(`🔍 Validating room ${roomId}`);
 
     const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
     if (!workspace) {
-      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
+      return res.json({ 
+        valid: false, 
+        score: 0, 
+        message: "Workspace belum ada",
+        details: { hasWorkspace: false }
+      });
     }
 
     const room = await DiscussionRoom.findByPk(roomId);
     const answer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
     
     if (!answer) {
-      return res.json({ valid: false, score: 0, message: "Jawaban guru tidak ditemukan" });
+      return res.json({ 
+        valid: false, 
+        score: 0, 
+        message: "Jawaban guru tidak ditemukan",
+        details: { hasAnswer: false }
+      });
     }
 
-    console.log("🔍 DEBUG VALIDATION room", roomId);
-    console.log("USER PSEUDOCODE:", JSON.stringify(workspace.pseudocode));
-    console.log("CORRECT PSEUDOCODE:", JSON.stringify(answer.pseudocode));
+    console.log("📊 Workspace found:", !!workspace);
+    console.log("📊 Answer found:", !!answer);
+    console.log("📝 User pseudo:", workspace.pseudocode?.substring(0, 100));
+    console.log("📝 Answer pseudo:", answer.pseudocode?.substring(0, 100));
 
-    // 🔥 SIMPLE NORMALIZE - PRESERVE STRUCTURE
+    // 🔥 NORMALIZE TEXT
     const cleanText = (text) => {
       if (!text) return "";
       return text
         .toLowerCase()
         .replace(/\s+/g, " ")
-        .replace(/[\$\$]/g, "")  // Hapus [] dari [BLANK]
-        .replace(/___blank_\d+___/gi, "")
-        .replace(/[""]/g, "")
+        .replace(/[\$\$]/g, "")              // Hapus [ ]
+        .replace(/___BLANK_\d+___/gi, "")    // Hapus ___BLANK_X___
+        .replace(/[""]/g, "")                // Hapus quotes
         .trim();
     };
 
-    /* PSEUDOCODE */
+    /* ================= PSEUDOCODE ================= */
     let pseudoScore = 0;
     let pseudoMatch = false;
+    let pseudoFeedback = "❌ Pseudocode kosong";
 
     if (workspace.pseudocode && answer.pseudocode) {
       const userClean = cleanText(workspace.pseudocode);
       const answerClean = cleanText(answer.pseudocode);
 
-      console.log("🧹 CLEANED:");
+      console.log("🧹 PSEUDO CLEANED:");
       console.log("USER:", `"${userClean}"`);
-      console.log("ANSWER:", `"${answerClean}"`);
+      console.log("ANS:", `"${answerClean}"`);
 
       // 🔥 EXACT MATCH
       if (userClean === answerClean) {
         pseudoScore = 50;
         pseudoMatch = true;
-      } 
-      // 🔥 CONTAINS MATCH (flexible)
-      else if (
-        userClean.includes(answerClean) || 
-        answerClean.includes(userClean) ||
-        userClean.trim() === answerClean.trim()
-      ) {
+        pseudoFeedback = "✅ Perfect!";
+      }
+      // 🔥 PARTIAL MATCH
+      else if (userClean.includes(answerClean) || answerClean.includes(userClean)) {
         pseudoScore = 50;
         pseudoMatch = true;
+        pseudoFeedback = "✅ Bagus!";
       }
-      // 🔥 KEYWORD MATCH
+      // 🔥 KEYWORD MATCH (80%+)
       else {
-        const keywords = answerClean.split(" ").filter(w => w.length > 2);
+        const answerWords = answerClean.split(" ").filter(w => w.length > 2);
         const userWords = userClean.split(" ");
-        const matches = keywords.filter(kw => userWords.some(uw => 
-          uw.includes(kw) || kw.includes(uw)
-        ));
-        if (matches.length >= keywords.length * 0.8) {
+        const matches = answerWords.filter(word => 
+          userWords.some(uw => uw.includes(word))
+        );
+        if (matches.length >= answerWords.length * 0.8) {
           pseudoScore = 40;
           pseudoMatch = true;
+          pseudoFeedback = `✅ ${matches.length}/${answerWords.length} keywords`;
+        } else {
+          pseudoFeedback = `❌ ${matches.length}/${answerWords.length} keywords`;
         }
       }
     }
 
-    /* FLOWCHART - SIMPLIFIED */
+    /* ================= FLOWCHART ================= */
     let flowScore = 0;
     let flowMatch = false;
+    let flowFeedback = "❌ Flowchart kosong";
 
     try {
       let userFlow = workspace.flowchart;
+      
+      // 🔥 SAFE PARSE
       if (typeof userFlow === "string") {
         userFlow = JSON.parse(userFlow);
       }
 
       const answerFlow = answer.flowchart;
-      if (userFlow && answerFlow) {
-        const userConds = (userFlow.conditions || []).length;
-        const answerConds = (answerFlow.conditions || []).length;
-        
+      
+      console.log("🔄 FLOWCHART:");
+      console.log("User conditions:", userFlow?.conditions?.length || 0);
+      console.log("Answer conditions:", answerFlow?.conditions?.length || 0);
+
+      if (userFlow?.conditions && answerFlow?.conditions) {
+        const userConds = userFlow.conditions.length;
+        const answerConds = answerFlow.conditions.length;
+
+        // 🔥 COUNT MATCH
         if (userConds === answerConds && userConds > 0) {
-          flowScore = 50;
-          flowMatch = true;
+          let condMatches = 0;
+          
+          userFlow.conditions.forEach((userCond, i) => {
+            if (!answerFlow.conditions[i]) return;
+            
+            const userCondClean = cleanText(userCond.condition || "");
+            const answerCondClean = cleanText(answerFlow.conditions[i].condition || "");
+            
+            if (userCondClean === answerCondClean || 
+                userCondClean.includes(answerCondClean)) {
+              condMatches++;
+            }
+          });
+
+          console.log(`Conditions match: ${condMatches}/${answerConds}`);
+          
+          if (condMatches >= answerConds * 0.8) {
+            flowScore = 50;
+            flowMatch = true;
+            flowFeedback = `✅ ${condMatches}/${answerConds} kondisi benar`;
+          }
+        }
+
+        // 🔥 ELSE CHECK
+        if (!flowMatch && answerFlow.elseInstruction) {
+          const userElse = cleanText(userFlow.elseInstruction || "");
+          const answerElse = cleanText(answerFlow.elseInstruction || "");
+          
+          if (userElse === answerElse && userElse) {
+            flowScore = 50;
+            flowMatch = true;
+            flowFeedback = "✅ ELSE benar!";
+          }
         }
       }
     } catch (e) {
-      console.log("Flowchart parse error:", e.message);
+      flowFeedback = `❌ Parse error: ${e.message}`;
     }
 
     const totalScore = pseudoScore + flowScore;
-    
+
     const result = {
       valid: totalScore >= 90,
       score: totalScore,
@@ -885,21 +1001,22 @@ exports.validateWorkspace = async (req, res) => {
         flowchartMatch: flowMatch,
         pseudoScore,
         flowScore,
-        userPseudoPreview: workspace.pseudocode?.substring(0, 100),
-        answerPreview: answer.pseudocode?.substring(0, 100)
+        pseudoFeedback,
+        flowFeedback,
+        userPreview: workspace.pseudocode?.substring(0, 80),
+        answerPreview: answer.pseudocode?.substring(0, 80)
       }
     };
 
-    console.log("✅ RESULT:", result);
+    console.log("🎯 FINAL RESULT:", result);
     res.json(result);
 
   } catch (error) {
-    console.error("❌ validateWorkspace ERROR:", error);
+    console.error("💥 validateWorkspace CRASH:", error);
     res.status(500).json({ 
       valid: false, 
       score: 0, 
-      error: error.message,
-      stack: error.stack 
+      error: error.message 
     });
   }
 };
