@@ -1,3 +1,4 @@
+const sequelize = require('../config/database');
 const DiscussionMessage = require("../models/DiscussionMessage");
 const DiscussionRoom = require("../models/DiscussionRoom");
 const User = require("../models/User");
@@ -560,68 +561,94 @@ const fillBlanks = (template, answers) => {
   return filled;
 };
 /* ================= SAVE FLOWCHART ================= */
-/* ================= SAVE FLOWCHART - JSON NATIVE ================= */
+/* ================= SAVE FLOWCHART - FIXED ✅ ================= */
 exports.saveFlowchart = async (req, res) => {
-  const transaction = await sequelize.transaction();
+  let transaction;
   try {
     const roomId = parseInt(req.params.roomId);
     const { flowchart } = req.body;
+    const userId = req.user.id;
 
     console.log(`🔧 SAVE JSON room ${roomId}: ${flowchart?.conditions?.length || 0} conditions`);
+    console.log('📤 FLOWCHART RAW:', JSON.stringify(flowchart, null, 2));
 
-    // 🔥 CLEAN OBJECT (NO STRINGIFY!)
+    // 🔥 VALIDASI INPUT
+    if (!flowchart || !Array.isArray(flowchart.conditions)) {
+      return res.status(400).json({ error: "Flowchart conditions required" });
+    }
+
+    // 🔥 MULAI TRANSACTION - FIXED!
+    transaction = await Workspace.sequelize.transaction();
+
+    // 🔥 CLEAN & VALIDATE
     const cleanFlow = {
-      conditions: (flowchart?.conditions || [])
+      conditions: flowchart.conditions
         .map(c => ({
           condition: String(c.condition || '').trim(),
           yes: String(c.yes || '').trim(),
           no: String(c.no || '').trim()
         }))
-        .filter(c => c.condition),
+        .filter(c => c.condition && c.condition.length > 0), // HANYA VALID
       elseInstruction: String(flowchart.elseInstruction || '').trim(),
       showElse: !!flowchart.showElse
     };
 
+    console.log(`🔍 CLEANED: ${cleanFlow.conditions.length} conditions`);
+    console.log('FIRST:', cleanFlow.conditions[0]);
+
     if (cleanFlow.conditions.length === 0) {
       await transaction.rollback();
-      return res.status(400).json({ error: "No valid conditions" });
+      return res.status(400).json({ 
+        error: "No valid conditions found", 
+        received: flowchart.conditions.length 
+      });
     }
 
-    // 🔥 UPSERT DIRECT JSON OBJECT
-    const [result] = await Workspace.upsert({
+    // 🔥 SAVE DIRECT JSON ke DB
+    await Workspace.upsert({
       roomId,
-      flowchart: cleanFlow,  // ✅ DIRECT OBJECT ke JSON column
-      pseudocode: sequelize.fn('COALESCE', sequelize.col('pseudocode'), '')
-    }, { 
-      transaction, 
-      returning: true 
-    });
+      flowchart: cleanFlow,  // ✅ JSON COLUMN - DIRECT OBJECT
+      pseudocode: Workspace.sequelize.fn('COALESCE', Workspace.sequelize.col('pseudocode'), '')
+    }, { transaction });
 
-    console.log(`✅ SAVED:`, {
-      conditions: cleanFlow.conditions.length,
-      firstCond: cleanFlow.conditions[0]?.condition
-    });
+    // 🔥 TASK 4 DONE
+    await RoomTaskProgress.upsert({ 
+      roomId, 
+      taskId: 4, 
+      done: true 
+    }, { transaction });
 
-    // 🔥 TASK & ATTEMPT
-    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
+    // 🔥 COUNT ATTEMPT
+    const attemptCount = await WorkspaceAttempt.count({ 
+      where: { roomId, type: "flowchart" }, 
+      transaction 
+    });
     
-    const attemptCount = await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" }, transaction });
     await WorkspaceAttempt.create({
-      roomId, type: "flowchart", attemptNumber: attemptCount + 1, content: JSON.stringify(cleanFlow)
+      roomId, 
+      type: "flowchart", 
+      attemptNumber: attemptCount + 1, 
+      content: JSON.stringify(cleanFlow)
     }, { transaction });
 
     await transaction.commit();
+    console.log(`✅ SAVED room ${roomId}: ${cleanFlow.conditions.length} conditions`);
 
     res.json({
       status: true,
-      message: `✅ Saved ${cleanFlow.conditions.length} conditions`,
-      data: cleanFlow
+      message: `✅ Saved ${cleanFlow.conditions.length} conditions!`,
+      data: cleanFlow,
+      attempts: attemptCount + 1
     });
 
   } catch (error) {
-    await transaction.rollback();
-    console.error("saveFlowchart JSON error:", error);
-    res.status(500).json({ error: error.message });
+    if (transaction) await transaction.rollback();
+    console.error("❌ saveFlowchart ERROR:", error);
+    res.status(500).json({ 
+      error: "Save failed", 
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 /* ================= GET WORKSPACE ================= */
