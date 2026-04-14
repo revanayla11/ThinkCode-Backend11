@@ -423,11 +423,18 @@ exports.getUserXp = async (req, res) => {
 };
 
 /* ================= NEW: GET WORKSPACE DATA (COMPLETE) ================= */
+/* ================= GET WORKSPACE DATA - BULLETPROOF JSON ================= */
 exports.getWorkspaceData = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
     const workspace = await Workspace.findOne({ where: { roomId } });
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
+
+    console.log(`🔍 GET WORKSPACE ${roomId}:`, {
+      found: !!workspace,
+      pseudoLen: workspace?.pseudocode?.length || 0,
+      flowRawLen: workspace?.flowchart?.length || 0
+    });
 
     const taskMap = {};
     tasks.forEach(t => { taskMap[t.taskId] = t.done; });
@@ -435,43 +442,68 @@ exports.getWorkspaceData = async (req, res) => {
       if (!taskMap[i]) taskMap[i] = false;
     }
 
-    // 🔥 SUPER SAFE FLOWCHART PARSE
-    let flowchartObj = { conditions: [], elseInstruction: "" };
-    if (workspace?.flowchart) {
+    // 🔥 PSEUDOCODE - SAFE
+    const pseudocode = workspace?.pseudocode || "";
+
+    // 🔥 FLOWCHART - ULTRA SAFE PARSER
+    let flowchartObj = { conditions: [], elseInstruction: "", showElse: false };
+    const flowRaw = workspace?.flowchart || "";
+
+    if (flowRaw && flowRaw.trim().length > 5) {
       try {
-        const parsed = typeof workspace.flowchart === 'string' 
-          ? JSON.parse(workspace.flowchart) 
-          : workspace.flowchart;
+        // 🔥 CLEAN JSON STRING
+        let cleanJson = flowRaw
+          .replace(/\\"/g, '"')      // Fix escaped quotes
+          .replace(/\\\//g, '/')     // Fix escaped slashes
+          .replace(/[\r\n\t]/g, '')  // Remove whitespace
+          .trim();
+
+        console.log(`🔧 FLOW CLEAN: "${cleanJson.substring(0, 80)}..."`);
+
+        const parsed = JSON.parse(cleanJson);
         
-        // ✅ VALIDATE STRUCTURE
+        // 🔥 VALIDATE STRUCTURE
         flowchartObj = {
           conditions: Array.isArray(parsed.conditions) ? parsed.conditions : [],
           elseInstruction: parsed.elseInstruction || "",
           showElse: !!parsed.showElse
         };
-        
-        console.log("✅ FLOWCHART PARSED:", {
-          conditions: flowchartObj.conditions.length,
-          firstCond: flowchartObj.conditions[0]?.condition
-        });
-        
-      } catch (e) {
-        console.error("❌ Flowchart PARSE ERROR:", e.message, "Raw:", workspace.flowchart);
-        flowchartObj = { conditions: [], elseInstruction: "", parseError: e.message };
+
+        console.log(`✅ FLOW PARSED: ${flowchartObj.conditions.length} conditions`);
+
+      } catch (parseErr) {
+        console.error(`❌ FLOW PARSE ERROR:`, parseErr.message);
+        console.error(`RAW FLOW:`, flowRaw);
+        flowchartObj = { 
+          conditions: [], 
+          elseInstruction: "",
+          parseError: parseErr.message,
+          raw: flowRaw.substring(0, 100)
+        };
       }
+    } else {
+      console.log(`⚠️ NO FLOW DATA (${flowRaw?.length || 0})`);
     }
 
-    res.json({
+    const response = {
       status: true,
       data: {
-        pseudocode: workspace?.pseudocode || "",
+        pseudocode,
         flowchart: flowchartObj,
-        tasks: taskMap
+        tasks: taskMap,
+        debug: {
+          flowRawLength: flowRaw.length,
+          flowParsedConditions: flowchartObj.conditions.length,
+          flowRawPreview: flowRaw.substring(0, 50)
+        }
       }
-    });
+    };
+
+    console.log(`✅ WORKSPACE SENT: flow conditions=${flowchartObj.conditions.length}`);
+    res.json(response);
 
   } catch (err) {
-    console.error("getWorkspaceData ERROR:", err);
+    console.error("❌ getWorkspaceData ERROR:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
