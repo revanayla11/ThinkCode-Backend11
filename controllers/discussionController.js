@@ -913,7 +913,7 @@ ALGORITMA
     read(___BLANK_1___)
     
     IF (___BLANK_2___) THEN
-        write("___BLANK_3___", ___BLANK_4___, " adalah Positif")
+        write("___BLANK_3___", ___BLANK_4___, " Angka adalah Positif")
     ENDIF
 
 END`;
