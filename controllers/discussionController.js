@@ -842,76 +842,128 @@ END`,
   }
 };
 
+// 🔥 HELPER FUNCTIONS - TAMBAH INI SEBELUM validateWorkspace
+const getPseudoFeedback = (score) => {
+  if (score >= 80) return "✅ Struktur lengkap & keyword tepat!";
+  if (score >= 60) return "⚠️ Hampir benar, cek kondisi IF";
+  if (score >= 40) return "📝 Tambah DEKLARASI & ALGORITMA";
+  return "🚨 Mulai dari dasar: DEKLARASI → read → IF → write";
+};
+
+const getExpectedAnswer = (materiId) => {
+  const templates = {
+    1: `deklarasi angka : integer algoritma read(angka) if (angka > 0) then write("Angka ", angka, " adalah Positif") endif end`,
+    2: `deklarasi nilai : integer algoritma read(nilai) if (nilai >= 70) then write("Status: Lulus") else write("Status: Tidak Lulus") endif end`,
+    3: `deklarasi umur : integer algoritma read(umur) if (umur <= 12) then write("Kategori: Anak-anak") else if (umur <= 17) then write("Kategori: Remaja") else if (umur <= 59) then write("Kategori: Dewasa") else write("Kategori: Lansia") endif end`
+  };
+  return templates[materiId] || templates[1];
+};
+
+const normalize = (text) => {
+  if (!text) return "";
+  return text
+    .replace(/___BLANK_\d+___/gi, '')
+    .replace(/\$BLANK \d+\$/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+};
+
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const room = await DiscussionRoom.findByPk(roomId);
-    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
-
-    if (!workspace) {
-      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
+    const safeRoomId = parseInt(roomId);
+    
+    if (isNaN(safeRoomId)) {
+      return res.status(400).json({ valid: false, score: 0, error: "Invalid roomId" });
     }
 
-    // 🔥 DYNAMIC EXPECTED ANSWER - SESUAI TEMPLATE
-    const getExpectedAnswer = (materiId) => {
-      const templates = {
-        1: `DEKLARASI angka : integer ALGORITMA read(angka) IF (angka > 0) THEN write("Angka ", angka, " adalah Positif") ENDIF END`,
-        2: `DEKLARASI nilai : integer ALGORITMA read(nilai) IF (nilai >= 70) THEN write("Status: Lulus") ELSE write("Status: Tidak Lulus") ENDIF END`,
-        3: `DEKLARASI umur : integer ALGORITMA read(umur) IF (umur <= 12) THEN write("Kategori: Anak-anak") ELSE IF (umur <= 17) THEN write("Kategori: Remaja") ELSE IF (umur <= 59) THEN write("Kategori: Dewasa") ELSE write("Kategori: Lansia") ENDIF END`
-      };
-      return templates[materiId] || templates[1];
-    };
+    console.log(`🔍 [VALIDATE] Room ${safeRoomId}`);
 
-    // 🔥 NORMALIZER LEMAH - HANYA BERSIHKAN BLANKS
-    const normalize = (text) => {
-      if (!text) return "";
-      return text
-        // 1. HAPUS BLANKS SAJA
-        .replace(/___BLANK_\d+___/gi, '')
-        .replace(/\$BLANK \d+\$/gi, '')
-        // 2. NORMALIZE SPASI MINIMAL
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-    };
+    // 1. CEK ROOM
+    const room = await DiscussionRoom.findByPk(safeRoomId);
+    if (!room) {
+      console.error(`❌ Room ${safeRoomId} NOT FOUND`);
+      return res.status(404).json({ valid: false, score: 0, error: "Room tidak ditemukan" });
+    }
 
-    const userRaw = workspace.pseudocode || "";
-    const userPseudo = normalize(userRaw);
-    const expectedRaw = getExpectedAnswer(parseInt(room?.materiId || 1));
-    const answerPseudo = normalize(expectedRaw);
+    // 2. CEK WORKSPACE
+    const workspace = await Workspace.findOne({ where: { roomId: safeRoomId } });
+    if (!workspace) {
+      console.log(`⚠️ Workspace ${safeRoomId} kosong`);
+      return res.json({ 
+        valid: false, 
+        score: 0, 
+        message: "Workspace kosong - save pseudocode & flowchart dulu!" 
+      });
+    }
 
-    console.log("🔍 USER:", `"${userPseudo.substring(0, 100)}..."`);
-    console.log("✅ ANSWER:", `"${answerPseudo.substring(0, 100)}..."`);
-    console.log("🎯 MATERI:", room?.materiId);
+    const materiId = parseInt(room.materiId || 1);
 
-    // 🔥 VALIDASI SIMPEL - WORD MATCH + STRUCTURE
-    const pseudoScore = validatePseudocode(userPseudo, answerPseudo, room?.materiId);
-    
-    // 🔥 FLOWCHART VALIDASI - LIHAT SEMUA KONDISI
-    const flowResult = validateFlowchart(workspace.flowchart, room?.materiId);
+    // 🔥 PSEUDOCODE VALIDATION
+    let pseudoScore = 0;
+    let pseudoFeedback = "Belum ada pseudocode";
+    if (workspace.pseudocode?.trim()) {
+      const userClean = normalize(workspace.pseudocode);
+      const expected = normalize(getExpectedAnswer(materiId));
+      
+      // Simple keyword matching
+      const keywords = ['deklarasi', 'algoritma', 'read', 'if', 'write', 'endif'];
+      const matches = keywords.filter(kw => userClean.includes(kw));
+      pseudoScore = Math.min(100, (matches.length / keywords.length) * 80);
+      
+      pseudoFeedback = matches.length >= 4 
+        ? "✅ Bagus! Struktur lengkap" 
+        : `⚠️ Butuh: ${keywords.slice(0, 3).join(', ')}`;
+    }
 
-    const totalScore = Math.round((pseudoScore * 0.6) + (flowResult.score * 0.4));
-    const isValid = totalScore >= 75;
+    // 🔥 FLOWCHART VALIDATION
+    let flowScore = 0;
+    let flowFeedback = "Belum ada flowchart";
+    if (workspace.flowchart) {
+      try {
+        const flow = JSON.parse(workspace.flowchart);
+        const hasConditions = Array.isArray(flow.conditions) && flow.conditions.length > 0;
+        flowScore = hasConditions ? 80 : 20;
+        flowFeedback = hasConditions 
+          ? "✅ Ada kondisi!" 
+          : "❌ Tambah minimal 1 kondisi IF";
+      } catch (e) {
+        flowFeedback = "❌ Flowchart rusak";
+      }
+    }
+
+    const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
+    const valid = totalScore >= 75;
+
+    console.log(`✅ [VALIDATE ${safeRoomId}] Score: ${totalScore}% (pseudo:${pseudoScore}, flow:${flowScore})`);
 
     res.json({
-      valid: isValid,
+      valid,
       score: totalScore,
       details: {
         pseudocode: {
           match: pseudoScore >= 80,
           score: pseudoScore,
-          feedback: getPseudoFeedback(pseudoScore),
-          userRaw,
-          normalized: userPseudo,
-          expected: answerPseudo
+          feedback: pseudoFeedback,
+          hasContent: !!workspace.pseudocode?.trim()
         },
-        flowchart: flowResult
+        flowchart: {
+          match: flowScore >= 80,
+          score: flowScore,
+          feedback: flowFeedback,
+          hasContent: !!workspace.flowchart
+        }
       }
     });
 
   } catch (error) {
     console.error("❌ VALIDATE ERROR:", error);
-    res.status(500).json({ valid: false, score: 0, error: error.message });
+    res.status(500).json({ 
+      valid: false, 
+      score: 0, 
+      error: "Server error: " + error.message 
+    });
   }
 };
 
