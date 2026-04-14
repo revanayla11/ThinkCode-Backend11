@@ -11,44 +11,37 @@ router.post("/room/:roomId/join", verifyToken, discussionController.joinRoom);
 router.post("/room/:roomId/send", verifyToken, discussionController.sendMessage);
 
 // ================= MINI LESSON =================
-router.get("/mini-lesson/:materiId", verifyToken, discussionController.getMiniLesson); // ✅ FIXED
+router.get("/mini-lesson/:materiId", verifyToken, discussionController.getMiniLesson);
 
 // ================= CLUES =================
-router.get("/clues/:materiId", verifyToken, discussionController.getClues);           // ✅ FIXED
-router.get("/clue/used/:roomId", verifyToken, discussionController.getUsedClues);    // ✅ FIXED
-router.post("/clue/use/:roomId/:clueId", verifyToken, discussionController.useClue); // ✅ FIXED
+router.get("/clues/:materiId", verifyToken, discussionController.getClues);
+router.get("/clue/used/:roomId", verifyToken, discussionController.getUsedClues);
+router.post("/clue/use/:roomId/:clueId", verifyToken, discussionController.useClue);
 
-// ================= WORKSPACE ================= ✅ TAMBAH INI
+// ================= WORKSPACE =================
 router.get("/room/:roomId/workspace-data", verifyToken, discussionController.getWorkspaceData);
 router.get("/room/:roomId/tasks", verifyToken, discussionController.getTaskProgress);
 router.post("/room/:roomId/pseudocode", verifyToken, discussionController.savePseudocode);
 router.post("/room/:roomId/flowchart", verifyToken, discussionController.saveFlowchart);
 router.post("/room/:roomId/validate", verifyToken, discussionController.validateWorkspace);
 
-// ================= TEMPLATE ================= ✅ TAMBAH INI
-router.get("/template/:roomId", verifyToken, discussionController.getPseudocodeTemplate);
+// ================= DYNAMIC TEMPLATE =================
+router.get("/template-dynamic/:materiId", verifyToken, discussionController.getDynamicTemplate);
 
-// ================= TIMER ================= ✅ TAMBAH INI
-router.get("/timer/:roomId/check", verifyToken, discussionController.checkTimerStatus);
-router.post("/room/:roomId/timer/start", verifyToken, discussionController.startRoomTimer);
-
-// ================= PERFORMANCE & STATUS ================= ✅ SUDAH ADA
+// ================= PERFORMANCE & STATUS =================
 router.get("/room/:roomId/performance", verifyToken, discussionController.getRoomPerformance);
 router.get("/submission/status/:roomId", verifyToken, discussionController.getSubmissionStatus);
 
-// ================= TASKS (OLD ROUTES - HAPUS ATAU REDIRECT) =================
-router.get("/task/:roomId", verifyToken, discussionController.getTaskProgress);
-router.put("/task/:roomId/:taskId", verifyToken, discussionController.updateTask);
+// ================= TASKS =================
+router.post("/room/:roomId/task/:taskId/toggle", verifyToken, discussionController.toggleTask);
 
-// ================= UPLOAD CHECK =================
-router.get("/upload/:roomId/check", verifyToken, discussionController.checkAllTasksDone);
+// ================= TIMER =================
+router.get("/timer/:roomId/check", verifyToken, discussionController.checkTimerStatus);
+router.post("/room/:roomId/timer/start", verifyToken, discussionController.startRoomTimer);
 
-// routes/discussion.js - TAMBAHKAN INI
-router.post("/room/:roomId/task/:taskId/toggle", verifyToken, discussionController.toggleTask); // ✅ NEW
-
-router.get('/template-dynamic/:materiId', discussionController.getDynamicTemplate);
-
+// ================= DEBUG (ADMIN ONLY) =================
 router.post('/room/:roomId/debug', auth, verifyToken, discussionController.debugRoom);
 router.get('/room/:roomId/debug-validation', auth, verifyToken, discussionController.debugValidation);
-module.exports = router;
+router.get('/room/:roomId/workspace-attempts', auth, verifyToken, discussionController.getWorkspaceAttempts);
 
+module.exports = router;
