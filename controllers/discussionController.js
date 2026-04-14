@@ -837,69 +837,69 @@ exports.validateWorkspace = async (req, res) => {
     const { roomId } = req.params;
     const safeRoomId = parseInt(roomId);
     
-    if (isNaN(safeRoomId)) {
-      return res.status(400).json({ valid: false, score: 0, error: "Invalid roomId" });
-    }
+    if (isNaN(safeRoomId)) return res.status(400).json({ valid: false, score: 0, error: "Invalid roomId" });
 
-    console.log(`🔍 [VALIDATE] Room ${safeRoomId}`);
-
-    // 1. CEK ROOM
     const room = await DiscussionRoom.findByPk(safeRoomId);
-    if (!room) {
-      console.error(`❌ Room ${safeRoomId} NOT FOUND`);
-      return res.status(404).json({ valid: false, score: 0, error: "Room tidak ditemukan" });
-    }
+    if (!room) return res.status(404).json({ valid: false, score: 0, error: "Room not found" });
 
-    // 2. CEK WORKSPACE
     const workspace = await Workspace.findOne({ where: { roomId: safeRoomId } });
-    if (!workspace) {
-      console.log(`⚠️ Workspace ${safeRoomId} kosong`);
-      return res.json({ 
-        valid: false, 
-        score: 0, 
-        message: "Workspace kosong - save pseudocode & flowchart dulu!" 
-      });
-    }
+    if (!workspace) return res.json({ valid: false, score: 0, message: "Workspace kosong" });
 
     const materiId = parseInt(room.materiId || 1);
+    console.log(`🔍 [VALIDATE ${safeRoomId}] Materi: ${materiId}, Pseudo len: ${workspace.pseudocode?.length || 0}, Flow len: ${workspace.flowchart?.length || 0}`);
 
-    // 🔥 PSEUDOCODE VALIDATION
-    let pseudoScore = 0;
-    let pseudoFeedback = "Belum ada pseudocode";
+    // 🔥 PSEUDOCODE (sama)
+    let pseudoScore = 0, pseudoFeedback = "Belum ada pseudocode";
     if (workspace.pseudocode?.trim()) {
       const userClean = normalize(workspace.pseudocode);
       const expected = normalize(getExpectedAnswer(materiId));
-      
-      // Simple keyword matching
       const keywords = ['deklarasi', 'algoritma', 'read', 'if', 'write', 'endif'];
       const matches = keywords.filter(kw => userClean.includes(kw));
       pseudoScore = Math.min(100, (matches.length / keywords.length) * 80);
-      
-      pseudoFeedback = matches.length >= 4 
-        ? "✅ Bagus! Struktur lengkap" 
-        : `⚠️ Butuh: ${keywords.slice(0, 3).join(', ')}`;
+      pseudoFeedback = matches.length >= 4 ? "✅ Bagus!" : "⚠️ Perbaiki struktur";
     }
 
-    // 🔥 FLOWCHART VALIDATION
-    let flowScore = 0;
-    let flowFeedback = "Belum ada flowchart";
-    if (workspace.flowchart) {
+    // 🔥 FLOWCHART - ROBUST PARSE!
+    let flowScore = 0, flowFeedback = "Belum ada flowchart", flowHasContent = false;
+    if (workspace.flowchart && workspace.flowchart.trim()) {
+      flowHasContent = true;
+      console.log(`🔄 Parsing flowchart: "${workspace.flowchart.slice(0, 100)}..."`);
+      
       try {
-        const flow = JSON.parse(workspace.flowchart);
-        const hasConditions = Array.isArray(flow.conditions) && flow.conditions.length > 0;
-        flowScore = hasConditions ? 80 : 20;
-        flowFeedback = hasConditions 
-          ? "✅ Ada kondisi!" 
-          : "❌ Tambah minimal 1 kondisi IF";
-      } catch (e) {
-        flowFeedback = "❌ Flowchart rusak";
+        let flow;
+        if (typeof workspace.flowchart === 'string') {
+          flow = JSON.parse(workspace.flowchart);
+        } else {
+          flow = workspace.flowchart;
+        }
+
+        console.log(`✅ Parsed flow:`, flow);
+
+        const conditions = Array.isArray(flow.conditions) ? flow.conditions : [];
+        if (conditions.length > 0) {
+          // MATERI 1: cek ">" atau "positif"
+          const firstCond = (conditions[0].condition || '').toLowerCase();
+          const hasYes = !!(conditions[0].yes?.trim());
+          
+          flowScore = 40; // Base
+          if (firstCond.includes('>') || firstCond.includes('positif')) flowScore += 30;
+          if (hasYes) flowScore += 30;
+          
+          flowFeedback = `✅ ${conditions.length} kondisi OK!`;
+        } else {
+          flowFeedback = "❌ Kondisi kosong";
+        }
+      } catch (parseErr) {
+        console.error("❌ Flowchart PARSE ERROR:", parseErr.message, "Raw:", workspace.flowchart);
+        flowFeedback = `❌ JSON rusak: ${parseErr.message}`;
+        flowScore = 0;
       }
     }
 
     const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
     const valid = totalScore >= 75;
 
-    console.log(`✅ [VALIDATE ${safeRoomId}] Score: ${totalScore}% (pseudo:${pseudoScore}, flow:${flowScore})`);
+    console.log(`📊 FINAL: Pseudo ${pseudoScore}%, Flow ${flowScore}% = ${totalScore}%`);
 
     res.json({
       valid,
@@ -915,18 +915,14 @@ exports.validateWorkspace = async (req, res) => {
           match: flowScore >= 80,
           score: flowScore,
           feedback: flowFeedback,
-          hasContent: !!workspace.flowchart
+          hasContent: flowHasContent  // ✅ FIXED!
         }
       }
     });
 
   } catch (error) {
-    console.error("❌ VALIDATE ERROR:", error);
-    res.status(500).json({ 
-      valid: false, 
-      score: 0, 
-      error: "Server error: " + error.message 
-    });
+    console.error("❌ VALIDATE:", error);
+    res.status(500).json({ valid: false, score: 0, error: error.message });
   }
 };
 
