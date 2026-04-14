@@ -472,13 +472,12 @@ exports.getTaskProgress = async (req, res) => {
   }
 };
 
-/* ================= SAVE PSEUDOCODE ================= */
-/* ================= SAVE PSEUDOCODE - UNLIMITED + XP PENALTY ================= */
+/* ================= SAVE PSEUDOCODE - FIXED ================= */
 exports.savePseudocode = async (req, res) => {
   const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
-    const { pseudocode } = req.body;
+    let { pseudocode } = req.body;
     const userId = req.user.id;
 
     console.log(`💾 savePseudocode room ${roomId}`);
@@ -487,21 +486,29 @@ exports.savePseudocode = async (req, res) => {
       return res.status(400).json({ status: false, message: "Pseudocode kosong" });
     }
 
+    // 🔥 CRITICAL FIX: HAPUS SEMUA [BLANK X] DAN ___BLANK_X___
+    pseudocode = pseudocode
+      .replace(/\$\s*BLANK\s*\d+\s*\$/gi, '')  // Hapus [BLANK 1], [BLANK 5], etc
+      .replace(/___BLANK_\d+___/gi, '')       // Hapus ___BLANK_0___
+      .trim();
+
+    console.log("🔧 CLEANED PSEUDOCODE:", pseudocode);
+
     // Hitung attempts
     const attemptCount = await WorkspaceAttempt.count({
       where: { roomId, type: "pseudocode" }
     });
 
-    // 🔥 NEW ATTEMPT
+    // NEW ATTEMPT
     await WorkspaceAttempt.create({
       roomId,
       type: "pseudocode",
       attemptNumber: attemptCount + 1,
-      content: pseudocode,
-      userId  // Track siapa yang save
-    });
+      content: pseudocode,  // Simpan yang sudah bersih
+      userId
+    }, { transaction });
 
-    // XP PENALTY - mulai attempt 6 (-10 XP per anggota)
+    // XP PENALTY
     if (attemptCount + 1 > 5) {
       const penalty = 10;
       const room = await DiscussionRoom.findByPk(roomId, { transaction });
@@ -520,14 +527,12 @@ exports.savePseudocode = async (req, res) => {
           );
         }
       }
-      
-      console.log(`⚠️ Pseudocode penalty: -${penalty}XP x${members.length} members (attempt ${attemptCount + 1})`);
     }
 
-    // Save workspace
+    // 🔥 SAVE CLEAN PSEUDOCODE
     await Workspace.upsert({
       roomId,
-      pseudocode: pseudocode.trim()
+      pseudocode: pseudocode  // Yang sudah bersih!
     }, { transaction });
 
     await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true }, { transaction });
@@ -537,8 +542,9 @@ exports.savePseudocode = async (req, res) => {
     res.json({ 
       status: true, 
       attempt: attemptCount + 1,
-      penalty: attemptCount + 1 > 5 ? 10 : 0,
-      message: `Saved! Attempt ${attemptCount + 1}${attemptCount + 1 > 5 ? ' (-10XP)' : ''}`
+      cleanedLength: pseudocode.length,
+      preview: pseudocode.substring(0, 100) + "...",
+      message: `✅ Saved! (Cleaned ${pseudocode.length} chars)`
     });
 
   } catch (err) {
@@ -547,7 +553,6 @@ exports.savePseudocode = async (req, res) => {
     res.status(500).json({ status: false, message: err.message });
   }
 };
-
 /* ================= SAVE FLOWCHART - UNLIMITED + XP PENALTY ================= */
 /* ================= SAVE FLOWCHART - PERMANENT FIX ================= */
 exports.saveFlowchart = async (req, res) => {
@@ -778,215 +783,124 @@ exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
 
-    const workspace = await Workspace.findOne({
-      where: { roomId: parseInt(roomId) }
-    });
-
+    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
     if (!workspace) {
-      return res.json({
-        valid: false,
-        score: 0,
-        message: "Workspace belum ada"
-      });
+      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
     }
 
     const room = await DiscussionRoom.findByPk(roomId);
-    const answer = await MateriAnswer.findOne({
-      where: { materiId: room.materiId }
-    });
+    const answer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
+    
+    if (!answer) {
+      return res.json({ valid: false, score: 0, message: "Jawaban guru tidak ditemukan" });
+    }
 
-    console.log("🔍 VALIDATION DEBUG:");
-    console.log("User pseudocode:", workspace.pseudocode);
-    console.log("Correct pseudocode:", answer?.pseudocode);
+    console.log("🔍 DEBUG VALIDATION room", roomId);
+    console.log("USER PSEUDOCODE:", JSON.stringify(workspace.pseudocode));
+    console.log("CORRECT PSEUDOCODE:", JSON.stringify(answer.pseudocode));
 
-    /* ================= BETTER NORMALIZE - PRESERVE STRUCTURE ================= */
-    const normalizePseudo = (text) => {
+    // 🔥 SIMPLE NORMALIZE - PRESERVE STRUCTURE
+    const cleanText = (text) => {
       if (!text) return "";
       return text
         .toLowerCase()
-        .replace(/\s+/g, " ")  // Single space only
-        .replace(/[""]/g, "")  // Hapus tanda kutip
-        .replace(/___blank_\d+___/gi, "") // Hapus blank placeholder
+        .replace(/\s+/g, " ")
+        .replace(/[\$\$]/g, "")  // Hapus [] dari [BLANK]
+        .replace(/___blank_\d+___/gi, "")
+        .replace(/[""]/g, "")
         .trim();
     };
 
-    /* ================= PSEUDOCODE - FLEXIBLE MATCHING ================= */
+    /* PSEUDOCODE */
     let pseudoScore = 0;
     let pseudoMatch = false;
-    let pseudoFeedback = "";
 
-    if (workspace.pseudocode && answer?.pseudocode) {
-      const userPseudo = normalizePseudo(workspace.pseudocode);
-      const correctPseudo = normalizePseudo(answer.pseudocode);
+    if (workspace.pseudocode && answer.pseudocode) {
+      const userClean = cleanText(workspace.pseudocode);
+      const answerClean = cleanText(answer.pseudocode);
 
-      console.log("🔍 NORMALIZED:");
-      console.log("USER:", `"${userPseudo}"`);
-      console.log("CORRECT:", `"${correctPseudo}"`);
-      console.log("LENGTH USER:", userPseudo.length, "CORRECT:", correctPseudo.length);
+      console.log("🧹 CLEANED:");
+      console.log("USER:", `"${userClean}"`);
+      console.log("ANSWER:", `"${answerClean}"`);
 
-      // 🔥 EXACT MATCH (setelah normalize)
-      if (userPseudo === correctPseudo) {
+      // 🔥 EXACT MATCH
+      if (userClean === answerClean) {
         pseudoScore = 50;
         pseudoMatch = true;
-        pseudoFeedback = "✅ Perfect match!";
       } 
-      // 🔥 PARTIAL MATCH - minimal 80% similarity
-      else if (userPseudo.length > 0 && correctPseudo.length > 0) {
-        const similarity = calculateSimilarity(userPseudo, correctPseudo);
-        console.log("🔍 SIMILARITY:", similarity);
-        
-        if (similarity >= 0.8) {
+      // 🔥 CONTAINS MATCH (flexible)
+      else if (
+        userClean.includes(answerClean) || 
+        answerClean.includes(userClean) ||
+        userClean.trim() === answerClean.trim()
+      ) {
+        pseudoScore = 50;
+        pseudoMatch = true;
+      }
+      // 🔥 KEYWORD MATCH
+      else {
+        const keywords = answerClean.split(" ").filter(w => w.length > 2);
+        const userWords = userClean.split(" ");
+        const matches = keywords.filter(kw => userWords.some(uw => 
+          uw.includes(kw) || kw.includes(uw)
+        ));
+        if (matches.length >= keywords.length * 0.8) {
           pseudoScore = 40;
           pseudoMatch = true;
-          pseudoFeedback = `✅ Bagus! (${Math.round(similarity*100)}% match)`;
-        } else {
-          pseudoFeedback = `❌ Perlu diperbaiki (${Math.round(similarity*100)}%)`;
         }
       }
-    } else {
-      pseudoFeedback = "❌ Pseudocode kosong atau jawaban tidak ada";
     }
 
-    /* ================= FLOWCHART ================= */
+    /* FLOWCHART - SIMPLIFIED */
     let flowScore = 0;
     let flowMatch = false;
-    let flowFeedback = "";
 
     try {
       let userFlow = workspace.flowchart;
-      
-      // 🔥 SAFE JSON PARSE
       if (typeof userFlow === "string") {
-        try {
-          userFlow = JSON.parse(userFlow);
-        } catch (e) {
-          console.log("❌ Flowchart JSON parse error:", e.message);
-          flowFeedback = "❌ Flowchart format salah";
-        }
+        userFlow = JSON.parse(userFlow);
       }
 
-      const correctFlow = answer?.flowchart;
-
-      if (userFlow && correctFlow && typeof userFlow === 'object') {
-        const userConditions = userFlow.conditions || [];
-        const correctConditions = correctFlow.conditions || [];
-
-        console.log("🔍 FLOWCHART:");
-        console.log("User conditions:", userConditions.length);
-        console.log("Correct conditions:", correctConditions.length);
-
-        // 🔥 CHECK JUMLAH KONDISI
-        if (userConditions.length === correctConditions.length) {
-          let matchCount = 0;
-          
-          userConditions.forEach((userCond, i) => {
-            if (!correctConditions[i]) return;
-            
-            const userCondText = normalizePseudo(userCond.condition || "").trim();
-            const correctCondText = normalizePseudo(correctConditions[i].condition || "").trim();
-            
-            console.log(`Cond ${i}: USER="${userCondText}" | CORRECT="${correctCondText}"`);
-            
-            if (userCondText === correctCondText || 
-                userCondText.includes(correctCondText) ||
-                calculateSimilarity(userCondText, correctCondText) > 0.7) {
-              matchCount++;
-            }
-          });
-
-          if (matchCount === correctConditions.length) {
-            flowScore = 50;
-            flowMatch = true;
-            flowFeedback = "✅ Flowchart sempurna!";
-          } else {
-            flowFeedback = `⚠️ ${matchCount}/${correctConditions.length} kondisi benar`;
-          }
-        } else {
-          flowFeedback = `❌ Jumlah kondisi salah: ${userConditions.length} vs ${correctConditions.length}`;
+      const answerFlow = answer.flowchart;
+      if (userFlow && answerFlow) {
+        const userConds = (userFlow.conditions || []).length;
+        const answerConds = (answerFlow.conditions || []).length;
+        
+        if (userConds === answerConds && userConds > 0) {
+          flowScore = 50;
+          flowMatch = true;
         }
-
-        // 🔥 BONUS ELSE CHECK
-        if (!flowMatch && correctFlow.elseInstruction) {
-          const userElse = normalizePseudo(userFlow.elseInstruction || "");
-          const correctElse = normalizePseudo(correctFlow.elseInstruction || "");
-          
-          if (userElse === correctElse) {
-            flowScore = 50;
-            flowMatch = true;
-            flowFeedback = "✅ ELSE benar!";
-          }
-        }
-      } else {
-        flowFeedback = "❌ Flowchart kosong atau format salah";
       }
-    } catch (err) {
-      console.log("❌ Flowchart validation error:", err.message);
-      flowFeedback = "❌ Error parsing flowchart";
+    } catch (e) {
+      console.log("Flowchart parse error:", e.message);
     }
 
-    /* ================= SIMILARITY HELPER ================= */
-    function calculateSimilarity(str1, str2) {
-      str1 = str1.toLowerCase().trim();
-      str2 = str2.toLowerCase().trim();
-      
-      if (str1.length === 0 || str2.length === 0) return 0;
-      
-      const longer = str1.length > str2.length ? str1 : str2;
-      const shorter = str1.length > str2.length ? str2 : str1;
-      
-      return (longer.length - levenshteinDistance(longer, shorter)) / longer.length;
-    }
-
-    function levenshteinDistance(str1, str2) {
-      const matrix = [];
-      
-      for (let i = 0; i <= str2.length; i++) {
-        matrix[i] = [i];
-      }
-      
-      for (let j = 0; j <= str1.length; j++) {
-        matrix[0][j] = j;
-      }
-      
-      for (let i = 1; i <= str2.length; i++) {
-        for (let j = 1; j <= str1.length; j++) {
-          if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-            matrix[i][j] = matrix[i - 1][j - 1];
-          } else {
-            matrix[i][j] = Math.min(
-              matrix[i - 1][j - 1] + 1,
-              matrix[i][j - 1] + 1,
-              matrix[i - 1][j] + 1
-            );
-          }
-        }
-      }
-      
-      return matrix[str2.length][str1.length];
-    }
-
-    /* ================= FINAL SCORE ================= */
     const totalScore = pseudoScore + flowScore;
-
+    
     const result = {
       valid: totalScore >= 90,
       score: totalScore,
       details: {
         pseudocodeMatch: pseudoMatch,
         flowchartMatch: flowMatch,
-        pseudocodeScore: pseudoScore,
-        flowchartScore: flowScore,
-        pseudocodeFeedback,
-        flowchartFeedback
+        pseudoScore,
+        flowScore,
+        userPseudoPreview: workspace.pseudocode?.substring(0, 100),
+        answerPreview: answer.pseudocode?.substring(0, 100)
       }
     };
 
-    console.log("✅ FINAL RESULT:", result);
+    console.log("✅ RESULT:", result);
     res.json(result);
 
   } catch (error) {
     console.error("❌ validateWorkspace ERROR:", error);
-    res.status(500).json({ valid: false, score: 0, error: error.message });
+    res.status(500).json({ 
+      valid: false, 
+      score: 0, 
+      error: error.message,
+      stack: error.stack 
+    });
   }
 };
 
@@ -1377,11 +1291,9 @@ const applyAttemptPenalty = async (roomId, type, transaction) => {
   return penalty;
 };
 
-// Tambah di akhir file
 exports.debugValidation = async (req, res) => {
   try {
     const { roomId } = req.params;
-    
     const [workspace, room, answer] = await Promise.all([
       Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
       DiscussionRoom.findByPk(roomId),
@@ -1389,19 +1301,16 @@ exports.debugValidation = async (req, res) => {
     ]);
     
     res.json({
+      success: true,
       roomId,
-      workspace: {
-        pseudocode: workspace?.pseudocode,
-        flowchart: workspace?.flowchart
-      },
-      answer: {
-        pseudocode: answer?.pseudocode,
-        flowchart: answer?.flowchart
-      },
-      rawComparison: {
-        pseudoEqual: workspace?.pseudocode === answer?.pseudocode,
-        pseudoLength: workspace?.pseudocode?.length,
-        answerLength: answer?.pseudocode?.length
+      workspaceFound: !!workspace,
+      answerFound: !!answer,
+      userPseudo: workspace?.pseudocode,
+      answerPseudo: answer?.pseudocode,
+      userHasBlanks: workspace?.pseudocode?.includes('[BLANK'),
+      lengths: {
+        user: workspace?.pseudocode?.length,
+        answer: answer?.pseudocode?.length
       }
     });
   } catch (error) {

@@ -48,7 +48,7 @@ router.post("/room/:roomId/task/:taskId/toggle", verifyToken, discussionControll
 
 router.get('/template-dynamic/:materiId', discussionController.getDynamicTemplate);
 
-router.post('/room/:roomId/debug', auth, discussionController.debugRoom);
-
+router.post('/room/:roomId/debug', auth, verifyToken, discussionController.debugRoom);
+router.get('/room/:roomId/debug-validation', auth, verifyToken, discussionController.debugValidation);
 module.exports = router;
 
