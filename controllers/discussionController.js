@@ -38,53 +38,56 @@ exports.syncUserXp = async (userId, materiId, transaction = null) => {
 exports.getRoomPerformance = async (req, res) => {
   try {
     const { roomId } = req.params;
+    console.log(`🔍 Calculating performance room ${roomId}`);
 
-    // 🔥 CLUES
-    const usedClues = await DiscussionClueLog.count({ where: { roomId } });
+    // 🔥 1. CLUES
+    const usedClues = await DiscussionClueLog.count({ 
+      where: { roomId } 
+    });
+    console.log(`🧩 Clues used: ${usedClues}`);
 
-    // 🔥 ATTEMPTS - TERPISAH
-    const pseudoAttempts = await WorkspaceAttempt.count({ 
-      where: { roomId, type: "pseudocode" } 
-    });
-    const flowchartAttempts = await WorkspaceAttempt.count({ 
-      where: { roomId, type: "flowchart" } 
-    });
+    // 🔥 2. ATTEMPTS
+    const [pseudoAttempts, flowchartAttempts] = await Promise.all([
+      WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" } }),
+      WorkspaceAttempt.count({ where: { roomId, type: "flowchart" } })
+    ]);
     const totalAttempts = pseudoAttempts + flowchartAttempts;
+    console.log(`📝 Attempts: pseudo=${pseudoAttempts}, flow=${flowchartAttempts}, total=${totalAttempts}`);
 
-    // 🔥 TASKS - HARUS 5 TASK SEMUA DONE
-    const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
-    const allDone = tasks.length >= 5 && tasks.every(t => t.done === true);
+    // 🔥 3. TASKS - HARUS EXACT 5 TASK DONE
+    const tasks = await RoomTaskProgress.findAll({ 
+      where: { roomId },
+      attributes: ['taskId', 'done']
+    });
+    console.log(`📋 Tasks:`, tasks.map(t => ({id: t.taskId, done: t.done})));
+    
+    const taskDoneCount = tasks.filter(t => t.done === true).length;
+    const allDone = taskDoneCount === 5;
 
-    // 🔥 SCORING - START 100%
+    // 🔥 4. CALCULATION
     let score = 100;
     
-    // 🔥 PENALTY 1: Clue (-10% per clue, max 30%)
-    const cluePenalty = Math.min(usedClues * 10, 30);
-    score -= cluePenalty;
+    // Clue penalty: -10% per clue (max 30%)
+    score -= Math.min(usedClues * 10, 30);
     
-    // 🔥 PENALTY 2: Extra Attempts (-5% mulai attempt 6+ TOTAL)
-    const attemptsAbove5 = Math.max(0, totalAttempts - 5);
-    const attemptPenalty = attemptsAbove5 * 5;
-    score -= attemptPenalty;
+    // Attempt penalty: -5% mulai total attempt 6+
+    const extraAttempts = Math.max(0, totalAttempts - 5);
+    score -= extraAttempts * 5;
     
-    // 🔥 BONUS: All tasks done (+10%)
+    // Task bonus: +10% jika semua done
     if (allDone) score += 10;
     
-    // 🔥 CLAMP 0-110 (bonus max)
     score = Math.max(0, Math.min(110, score));
 
-    // 🔥 DEBUG LOG
-    console.log(`📊 ROOM ${roomId} PERFORMANCE:`, {
-      usedClues,
-      pseudoAttempts,
-      flowchartAttempts,
-      totalAttempts,
-      attemptsAbove5,
-      cluePenalty,
-      attemptPenalty,
-      allDone,
-      finalScore: Math.round(score)
-    });
+    const breakdown = {
+      base: 100,
+      cluePenalty: Math.min(usedClues * 10, 30),
+      attemptPenalty: extraAttempts * 5,
+      taskBonus: allDone ? 10 : 0,
+      final: score
+    };
+
+    console.log(`🎯 FINAL SCORE: ${Math.round(score)}%`, breakdown);
 
     res.json({
       score: Math.round(score),
@@ -93,19 +96,19 @@ exports.getRoomPerformance = async (req, res) => {
         pseudocode: pseudoAttempts,
         flowchart: flowchartAttempts,
         total: totalAttempts,
-        extra: attemptsAbove5
+        extra: extraAttempts
       },
-      allDone,
-      breakdown: {
-        base: 100,
-        cluePenalty,
-        attemptPenalty,
-        taskBonus: allDone ? 10 : 0
-      }
+      tasks: {
+        total: tasks.length,
+        done: taskDoneCount,
+        allDone
+      },
+      breakdown
     });
+
   } catch (error) {
-    console.error("getRoomPerformance ERROR:", error);
-    res.status(500).json({ message: "Server error", score: 100 });
+    console.error("Performance ERROR:", error);
+    res.status(500).json({ score: 100, error: error.message });
   }
 };
 
@@ -433,41 +436,60 @@ exports.getUserXp = async (req, res) => {
 };
 
 /* ================= NEW: GET WORKSPACE DATA (COMPLETE) ================= */
-/* ================= GET WORKSPACE - JSON NATIVE ================= */
 exports.getWorkspaceData = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
     const workspace = await Workspace.findOne({ where: { roomId } });
     
-    console.log(`🔍 JSON room ${roomId}:`, {
-      exists: !!workspace,
-      flowchart: workspace?.flowchart ? `${workspace.flowchart.conditions?.length || 0} conds` : 'null'
+    console.log(`🔍 Workspace room ${roomId}:`, {
+      hasPseudo: !!workspace?.pseudocode,
+      pseudoLength: workspace?.pseudocode?.length || 0,
+      hasFlow: !!workspace?.flowchart,
+      flowRaw: typeof workspace?.flowchart
     });
 
-    // 🔥 DIRECT ACCESS - NO PARSING!
-    const flowchartObj = workspace?.flowchart || { 
+    // 🔥 FLOWCHART - SAFE PARSE
+    let flowchartObj = { 
       conditions: [], 
       elseInstruction: "", 
       showElse: false 
     };
 
+    if (workspace?.flowchart) {
+      try {
+        // Fix double-escaped JSON
+        let flowStr = JSON.stringify(workspace.flowchart);
+        flowStr = flowStr.replace(/\\"/g, '"').replace(/\\\//g, '/');
+        
+        flowchartObj = typeof workspace.flowchart === 'string' 
+          ? JSON.parse(flowStr)
+          : workspace.flowchart;
+          
+        console.log(`✅ Parsed flowchart: ${flowchartObj.conditions?.length || 0} conditions`);
+      } catch (parseErr) {
+        console.error("Flow parse error:", parseErr.message);
+        flowchartObj = { conditions: [], elseInstruction: "", showElse: false };
+      }
+    }
+
     // 🔥 TASKS
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
     const taskMap = {};
-    tasks.forEach(t => taskMap[t.taskId] = t.done);
-    for (let i = 1; i <= 5; i++) taskMap[i] = !!taskMap[i];
+    for (let i = 1; i <= 5; i++) {
+      taskMap[i] = tasks.some(t => t.taskId === i && t.done) || false;
+    }
 
     res.json({
       status: true,
       data: {
         pseudocode: workspace?.pseudocode || "",
-        flowchart: flowchartObj,  // ✅ DIRECT JSON OBJECT
+        flowchart: flowchartObj,
         tasks: taskMap
       }
     });
 
   } catch (err) {
-    console.error("getWorkspaceData:", err);
+    console.error("getWorkspaceData ERROR:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
