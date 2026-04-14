@@ -576,105 +576,68 @@ const fillBlanks = (template, answers) => {
 };
 /* ================= SAVE FLOWCHART ================= */
 exports.saveFlowchart = async (req, res) => {
+  const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
     let { flowchart } = req.body;
 
-    console.log(`🔧 saveFlowchart room ${roomId}`);
-    console.log("📥 Input type:", typeof flowchart);
-    console.log("📥 Input preview:", JSON.stringify(flowchart)?.substring(0, 200));
+    console.log(`🔧 [SAVE FLOWCHART ${roomId}] Raw:`, JSON.stringify(flowchart)?.slice(0, 200));
 
-    // 🔥 HANDLE STRING/OBJECT
+    // Parse & validate (sama seperti sebelumnya)
     if (typeof flowchart === 'string') {
-      try {
-        flowchart = JSON.parse(flowchart);
-        console.log("✅ Parsed from string to object");
-      } catch (e) {
-        return res.status(400).json({ 
-          status: false, 
-          message: `Invalid JSON: ${e.message}` 
-        });
-      }
+      flowchart = JSON.parse(flowchart);
     }
 
-    // 🔥 VALIDASI
-    if (!flowchart || !Array.isArray(flowchart.conditions)) {
-      return res.status(400).json({ 
-        status: false, 
-        message: `Flowchart invalid. Conditions: ${flowchart?.conditions?.length || 0}` 
-      });
+    if (!flowchart?.conditions?.length) {
+      return res.status(400).json({ error: "Minimal 1 kondisi" });
     }
 
-    if (flowchart.conditions.length === 0) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "Minimal 1 kondisi diperlukan" 
-      });
-    }
-
-    // 🔥 CLEAN & VALIDATE DATA
     const cleanFlowchart = {
-      conditions: flowchart.conditions
-        .map(cond => ({
-          condition: (cond.condition || '').trim(),
-          yes: (cond.yes || '').trim(),
-          no: cond.no?.trim() || ''
-        }))
-        .filter(cond => cond.condition.length > 0), // Hapus kosong
+      conditions: flowchart.conditions.map(c => ({
+        condition: (c.condition || '').trim(),
+        yes: (c.yes || '').trim(),
+        no: c.no?.trim() || ''
+      })).filter(c => c.condition),
       elseInstruction: (flowchart.elseInstruction || '').trim(),
       showElse: !!flowchart.showElse
     };
 
-    if (cleanFlowchart.conditions.length === 0) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "Semua kondisi kosong" 
-      });
-    }
+    // 🔥 CRITICAL FIX: GET EXISTING WORKSPACE FIRST
+    const existing = await Workspace.findOne({ where: { roomId }, transaction });
+    const pseudocode = existing?.pseudocode || ""; // PRESERVE PSEUDOCODE!
 
-    console.log(`✅ CLEAN FLOWCHART: ${cleanFlowchart.conditions.length} conditions`);
-    console.log("Conditions preview:", cleanFlowchart.conditions.map(c => c.condition));
+    console.log(`📊 Existing pseudo len: ${pseudocode.length}, flow conditions: ${cleanFlowchart.conditions.length}`);
 
-    // Count attempts
-    const attemptCount = await WorkspaceAttempt.count({
-      where: { roomId, type: "flowchart" }
-    });
+    // 🔥 UPSERT with BOTH fields
+    await Workspace.upsert({
+      roomId,
+      pseudocode: pseudocode,        // ✅ PRESERVE
+      flowchart: JSON.stringify(cleanFlowchart)  // ✅ NEW
+    }, { transaction });
 
     // Save attempt
     await WorkspaceAttempt.create({
-      roomId,
-      type: "flowchart",
-      attemptNumber: attemptCount + 1,
+      roomId, type: "flowchart", 
+      attemptNumber: (await WorkspaceAttempt.count({ where: { roomId, type: "flowchart" }, transaction })) + 1,
       content: JSON.stringify(cleanFlowchart)
-    });
+    }, { transaction });
 
-    // 🔥 SAVE TO DB AS JSON STRING
-    await Workspace.upsert({
-      roomId,
-      flowchart: JSON.stringify(cleanFlowchart)
-    });
+    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
+    
+    await transaction.commit();
 
-    await RoomTaskProgress.upsert({ 
-      roomId, 
-      taskId: 4, 
-      done: true 
-    });
-
-    console.log(`💾 Flowchart SAVED to DB: ${cleanFlowchart.conditions.length} conditions`);
+    console.log(`💾 [SUCCESS ${roomId}] Flowchart saved! Conditions: ${cleanFlowchart.conditions.length}`);
     
     res.json({ 
       status: true, 
-      conditions: cleanFlowchart.conditions.length,
-      totalAttempts: attemptCount + 1,
-      message: `✅ Flowchart tersimpan! (${cleanFlowchart.conditions.length} kondisi)`
+      message: `✅ Flowchart tersimpan (${cleanFlowchart.conditions.length} kondisi)!`,
+      data: { conditions: cleanFlowchart.conditions.length }
     });
 
   } catch (err) {
-    console.error("❌ saveFlowchart ERROR:", err);
-    res.status(500).json({ 
-      status: false, 
-      message: err.message 
-    });
+    await transaction.rollback();
+    console.error("❌ saveFlowchart:", err);
+    res.status(500).json({ error: err.message });
   }
 };
 /* ================= GET WORKSPACE ================= */
