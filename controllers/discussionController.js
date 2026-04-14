@@ -889,11 +889,11 @@ exports.validateWorkspace = async (req, res) => {
       if (!text) return "";
       return text
         .toLowerCase()
-        .replace(/\s+/g, " ")                    // Single spaces
-        .replace(/[\$\$?"']/g, "")               // Remove [], ", '
-        .replace(/___BLANK_\d+___/gi, "")        // Remove blanks
-        .replace(/[?]/g, "")                     // Remove ?
-        .replace(/[^\w\s><=]+/g, " ")            // Keep logic symbols
+        .replace(/\s+/g, " ")                    
+        .replace(/[\$\$\$?"']/g, "")             
+        .replace(/___BLANK_\d+___/gi, "")        
+        .replace(/[?]/g, "")                     
+        .replace(/[^\w\s><=]+/g, " ")            
         .trim();
     };
 
@@ -913,19 +913,19 @@ exports.validateWorkspace = async (req, res) => {
       console.log("Clean user:", `"${userClean}"`);
       console.log("Clean answer:", `"${answerClean}"`);
 
-      // 🔥 STRATEGY 1: EXACT MATCH
+      // 🔥 STRATEGY 1: EXACT MATCH (50 poin)
       if (userClean === answerClean) {
         pseudoScore = 50;
         pseudoMatch = true;
         pseudoFeedback = "✅ PERFECT MATCH!";
       }
-      // 🔥 STRATEGY 2: CONTAINS (flexible)
+      // 🔥 STRATEGY 2: CONTAINS (50 poin)
       else if (userClean.includes(answerClean) || answerClean.includes(userClean)) {
         pseudoScore = 50;
         pseudoMatch = true;
         pseudoFeedback = "✅ Struktur benar!";
       }
-      // 🔥 STRATEGY 3: KEYWORD 80%+
+      // 🔥 STRATEGY 3: KEYWORD 80%+ (45 poin)
       else {
         const answerWords = answerClean.split(" ").filter(w => w.length > 2);
         const userWords = userClean.split(" ");
@@ -933,7 +933,7 @@ exports.validateWorkspace = async (req, res) => {
           userWords.some(uw => uw.includes(word) || word.includes(uw))
         );
         
-        const matchPct = (matches.length / answerWords.length) * 100;
+        const matchPct = answerWords.length > 0 ? (matches.length / answerWords.length) * 100 : 0;
         console.log(`Keywords: ${matches.length}/${answerWords.length} (${matchPct.toFixed(0)}%)`);
         
         if (matchPct >= 80) {
@@ -954,40 +954,44 @@ exports.validateWorkspace = async (req, res) => {
 
     try {
       // 🔥 PARSE USER FLOWCHART
-      let userFlow = workspace.flowchart;
-      if (typeof userFlow === "string") {
-        userFlow = JSON.parse(userFlow);
+      let userFlow = { conditions: [], elseInstruction: "" };
+      if (workspace.flowchart) {
+        try {
+          userFlow = typeof workspace.flowchart === 'string' 
+            ? JSON.parse(workspace.flowchart) 
+            : workspace.flowchart;
+        } catch (e) {
+          console.error("User flowchart parse error:", e.message);
+        }
       }
 
-      const answerFlowRaw = answer.flowchart;
-      let answerFlow = {};
-      
-      if (typeof answerFlowRaw === "string") {
-        answerFlow = JSON.parse(answerFlowRaw);
-      } else {
-        answerFlow = answerFlowRaw;
+      // 🔥 PARSE ANSWER FLOWCHART
+      let answerFlow = { conditions: [], elseInstruction: "" };
+      if (answer.flowchart) {
+        try {
+          answerFlow = typeof answer.flowchart === 'string' 
+            ? JSON.parse(answer.flowchart) 
+            : answer.flowchart;
+        } catch (e) {
+          console.error("Answer flowchart parse error:", e.message);
+        }
       }
 
-      // 🔥 EXTRACT CONDITIONS
       const userConditions = Array.isArray(userFlow?.conditions) ? userFlow.conditions : [];
       const answerConditions = Array.isArray(answerFlow?.conditions) ? answerFlow.conditions : [];
 
       console.log("User conditions:", userConditions.length);
-      console.log("User preview:", userConditions.slice(0, 2).map(c => c.condition));
       console.log("Answer conditions:", answerConditions.length);
-      console.log("Answer preview:", answerConditions.slice(0, 2).map(c => c.condition));
 
       // 🔥 FLOW MATCHING LOGIC
       if (userConditions.length > 0 && answerConditions.length > 0) {
-        // STRATEGY 1: JUMLAH SAMA + ISI COCOK
+        // STRATEGY 1: Exact count + high match
         if (userConditions.length === answerConditions.length) {
           let condMatches = 0;
           
           for (let i = 0; i < userConditions.length; i++) {
             const userCond = cleanText(userConditions[i]?.condition || "");
             const answerCond = cleanText(answerConditions[i]?.condition || "");
-            
-            console.log(`Cond ${i}: "${userCond}" vs "${answerCond}"`);
             
             if (userCond === answerCond || 
                 userCond.includes(answerCond) || 
@@ -997,23 +1001,23 @@ exports.validateWorkspace = async (req, res) => {
           }
           
           const matchPct = (condMatches / answerConditions.length) * 100;
-          console.log(`Condition match: ${condMatches}/${answerConditions.length} (${matchPct.toFixed(0)}%)`);
-          
           if (matchPct >= 80) {
             flowScore = 50;
             flowMatch = true;
-            flowFeedback = `✅ ${condMatches}/${answerConditions.length} kondisi benar`;
+            flowFeedback = `✅ ${condMatches}/${answerConditions.length} kondisi cocok`;
           }
         }
         
-        // STRATEGY 2: JUMLAH MINIMAL COCOK (kalau materi sederhana)
-        if (!flowMatch && userConditions.length >= 1 && answerConditions.length >= 1) {
+        // STRATEGY 2: Partial match (minimal 1 kondisi benar)
+        if (!flowMatch) {
           let anyMatch = false;
           for (const userCond of userConditions) {
             const userClean = cleanText(userCond.condition || "");
             for (const ansCond of answerConditions) {
               const ansClean = cleanText(ansCond.condition || "");
-              if (userClean === ansClean || userClean.includes(ansClean)) {
+              if (userClean === ansClean || 
+                  userClean.includes(ansClean) || 
+                  ansClean.includes(userClean)) {
                 anyMatch = true;
                 break;
               }
@@ -1024,20 +1028,20 @@ exports.validateWorkspace = async (req, res) => {
           if (anyMatch) {
             flowScore = 50;
             flowMatch = true;
-            flowFeedback = "✅ Ada kondisi yang cocok!";
+            flowFeedback = "✅ Minimal 1 kondisi cocok!";
           }
         }
       }
 
-      // STRATEGY 3: ELSE INSTRUCTION
-      if (!flowMatch && answerFlow.elseInstruction) {
-        const userElse = cleanText(userFlow?.elseInstruction || "");
-        const answerElse = cleanText(answerFlow.elseInstruction || "");
+      // STRATEGY 3: ELSE INSTRUCTION match
+      if (!flowMatch && userFlow.elseInstruction?.trim() && answerFlow.elseInstruction?.trim()) {
+        const userElse = cleanText(userFlow.elseInstruction);
+        const answerElse = cleanText(answerFlow.elseInstruction);
         
-        if (userElse === answerElse && userElse.trim().length > 0) {
+        if (userElse === answerElse) {
           flowScore = 50;
           flowMatch = true;
-          flowFeedback = "✅ ELSE instruction benar!";
+          flowFeedback = "✅ ELSE instruction cocok!";
         }
       }
 
@@ -1047,19 +1051,23 @@ exports.validateWorkspace = async (req, res) => {
     }
 
     /* ================================= FINAL SCORE ================================= */
-    const totalScore = pseudoScore + flowScore;
+    const totalScore = Math.round(pseudoScore + flowScore);
     const isValid = totalScore >= 90;
 
     const result = {
       valid: isValid,
       score: totalScore,
       details: {
-        pseudocodeMatch: pseudoMatch,
-        flowchartMatch: flowMatch,
-        pseudoScore,
-        flowScore,
-        pseudoFeedback,
-        flowFeedback,
+        pseudocode: {
+          match: pseudoMatch,
+          score: pseudoScore,
+          feedback: pseudoFeedback
+        },
+        flowchart: {
+          match: flowMatch,
+          score: flowScore,
+          feedback: flowFeedback
+        },
         debug: {
           userPseudoPreview: workspace.pseudocode?.substring(0, 80) || "EMPTY",
           answerPseudoPreview: answer.pseudocode?.substring(0, 80) || "EMPTY",
@@ -1069,10 +1077,12 @@ exports.validateWorkspace = async (req, res) => {
       }
     };
 
-    console.log("🎯 === FINAL RESULT ===");
-    console.log("Score:", totalScore, "%", isValid ? "✅ PASS" : "❌ FAIL");
-    console.log("Pseudo:", pseudoScore, pseudoMatch ? "✅" : "❌");
-    console.log("Flow:", flowScore, flowMatch ? "✅" : "❌");
+    console.log("🎯 FINAL RESULT:", {
+      score: totalScore,
+      valid: isValid ? "✅ PASS" : "❌ FAIL",
+      pseudo: `${pseudoScore} ${pseudoMatch ? "✅" : "❌"}`,
+      flow: `${flowScore} ${flowMatch ? "✅" : "❌"}`
+    });
     
     res.json(result);
 
@@ -1082,11 +1092,10 @@ exports.validateWorkspace = async (req, res) => {
       valid: false, 
       score: 0, 
       error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined  // ✅ FIXED SYNTAX
     });
   }
 };
-
 // Buat endpoint baru untuk template dinamis
 // 🔥 FULL DYNAMIC TEMPLATE - discussionController.js
 exports.getDynamicTemplate = async (req, res) => {
@@ -1475,5 +1484,30 @@ exports.debugValidation = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
+// 🔥 DEBUG ROOM (ADMIN ONLY) - TAMBAHKAN INI
+exports.debugRoom = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await DiscussionRoom.findByPk(roomId, {
+      include: [
+        { 
+          model: UserMateriProgress, 
+          as: 'members', 
+          attributes: ['userId', 'xp', 'percent'],
+          include: [{ model: User, attributes: ['name'] }]
+        }
+      ]
+    });
+    
+    res.json({ 
+      status: true, 
+      room: room?.toJSON() || null,
+      memberCount: room?.members?.length || 0,
+      message: "Debug room OK ✅" 
+    });
+  } catch (error) {
+    console.error("debugRoom error:", error);
+    res.status(500).json({ status: false, message: error.message });
+  }
+};
 module.exports = exports;
