@@ -811,6 +811,7 @@ const normalize = (text) => {
     .toLowerCase();
 };
 
+// Tambahkan di atas validateWorkspace
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -818,122 +819,216 @@ exports.validateWorkspace = async (req, res) => {
     
     console.log(`🔍 [VALIDATE] Room ${safeRoomId}`);
 
-    const room = await DiscussionRoom.findByPk(safeRoomId);
+    // 🔥 GET ROOM & WORKSPACE
+    const [room, workspace] = await Promise.all([
+      DiscussionRoom.findByPk(safeRoomId),
+      Workspace.findOne({ where: { roomId: safeRoomId } })
+    ]);
+
     if (!room) return res.status(404).json({ valid: false, score: 0, error: "Room not found" });
+    if (!workspace) return res.json({ valid: false, score: 0, message: "Workspace kosong" });
 
-    const workspace = await Workspace.findOne({ where: { roomId: safeRoomId } });
-    if (!workspace) {
-      console.log("❌ NO WORKSPACE");
-      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
-    }
+    // 🔥 GET GURU JAWABAN dari DB
+    const guruAnswer = await MateriAnswer.findOne({ 
+      where: { materiId: room.materiId } 
+    });
 
-    console.log(`📊 WORKSPACE: pseudo=${workspace.pseudocode?.length || 0}, flow=${workspace.flowchart?.length || 0}`);
+    console.log(`📚 GURU JAWABAN:`, {
+      pseudocode: guruAnswer?.pseudocode?.substring(0, 50),
+      flowchartConditions: guruAnswer?.flowchart?.conditions?.length || 0
+    });
 
-    // PSEUDOCODE VALIDATION
+    // 🔥 PSEUDOCODE VALIDATION - EXACT MATCH dengan NORMALIZE
     let pseudoScore = 0;
-    const pseudo = workspace.pseudocode || "";
-    if (pseudo.trim()) {
-      const clean = pseudo.toLowerCase().replace(/\s+/g, ' ').trim();
-      const hasDeklarasi = clean.includes('deklarasi');
-      const hasAlgoritma = clean.includes('algoritma');
-      const hasRead = clean.includes('read');
-      const hasIf = clean.includes('if');
-      const hasWrite = clean.includes('write');
+    let pseudoDetails = { match: false, score: 0, feedback: "❌ Pseudocode kosong" };
+    
+    if (workspace.pseudocode?.trim() && guruAnswer?.pseudocode?.trim()) {
+      const userPseudo = normalizePseudocode(workspace.pseudocode);
+      const guruPseudo = normalizePseudocode(guruAnswer.pseudocode);
       
-      pseudoScore = 0;
-      if (hasDeklarasi) pseudoScore += 20;
-      if (hasAlgoritma) pseudoScore += 20;
-      if (hasRead) pseudoScore += 15;
-      if (hasIf) pseudoScore += 15;
-      if (hasWrite) pseudoScore += 15;
-      if (clean.includes('> 0') || clean.includes('positif')) pseudoScore += 15;
-      
-      console.log(`✅ PSEUDO OK: ${pseudoScore}% (${clean.substring(0, 50)}...)`);
+      console.log(`🔍 PSEUDO COMPARE:`, {
+        user: userPseudo.substring(0, 50) + "...",
+        guru: guruPseudo.substring(0, 50) + "...",
+        exactMatch: userPseudo === guruPseudo
+      });
+
+      // 🔥 EXACT MATCH = 100%, SIMILARITY tinggi = 80-90%
+      if (userPseudo === guruPseudo) {
+        pseudoScore = 100;
+        pseudoDetails = { 
+          match: true, 
+          score: 100, 
+          feedback: "✅ IDENTIK dengan jawaban guru!",
+          exactMatch: true 
+        };
+      } else {
+        // Similarity score (Levenshtein-like)
+        const similarity = calculateSimilarity(userPseudo, guruPseudo);
+        pseudoScore = Math.max(0, similarity * 100);
+        pseudoDetails = { 
+          match: false, 
+          score: pseudoScore, 
+          feedback: `⚠️ Similarity ${Math.round(pseudoScore)}% - Cek struktur & keyword`,
+          similarity: Math.round(pseudoScore)
+        };
+      }
     }
 
-    // 🔥 FLOWCHART - ULTRA SAFE PARSER
+    // 🔥 FLOWCHART VALIDATION - JSON OBJECT COMPARE
     let flowScore = 0;
-    let flowDetails = { match: false, score: 0, feedback: "❌ No flowchart data", rawLength: 0 };
-    const flowRaw = workspace.flowchart || "";
-    
-    console.log(`🔄 FLOW RAW (${flowRaw.length}):`, flowRaw.substring(0, 100));
+    let flowDetails = { match: false, score: 0, feedback: "❌ Flowchart kosong" };
 
-    if (flowRaw && flowRaw.trim().length > 10) { // Minimal JSON length
+    if (workspace.flowchart && guruAnswer?.flowchart) {
       try {
-        // 🔥 FIX DOUBLE ESCAPE & INVALID JSON
-        let jsonStr = flowRaw
-          .replace(/\\"/g, '"')  // Fix escaped quotes
-          .replace(/\\\//g, '/') // Fix escaped slashes
-          .replace(/\n/g, '')    // Remove newlines
-          .trim();
-
-        console.log(`🔧 CLEAN JSON:`, jsonStr.substring(0, 100));
-
-        const flow = JSON.parse(jsonStr);
-        console.log(`✅ PARSED FLOW:`, flow);
-
-        if (Array.isArray(flow.conditions) && flow.conditions.length > 0) {
-          flowScore = 50;
-          const firstCond = flow.conditions[0];
-          
-          // CEK KONDISI
-          const condText = (firstCond.condition || '').toLowerCase().trim();
-          if (condText.includes('> 0') || condText.includes('positif')) {
-            flowScore += 30;
-          } else if (condText.includes('>')) {
-            flowScore += 20;
-          }
-
-          // CEK YES INSTRUCTION
-          if (firstCond.yes?.trim()) flowScore += 20;
-
-          flowDetails = {
-            match: flowScore >= 80,
-            score: flowScore,
-            feedback: `✅ ${flow.conditions.length} kondisi OK! (${firstCond.condition})`,
-            rawLength: flowRaw.length,
-            parsedConditions: flow.conditions.length,
-            firstCondition: firstCond.condition
-          };
-
-          console.log(`✅ FLOW OK: ${flowScore}% (${firstCond.condition})`);
-
-        } else {
-          console.log("❌ EMPTY CONDITIONS");
+        // Parse user flowchart (safe)
+        let userFlow = workspace.flowchart;
+        if (typeof userFlow === 'string') {
+          userFlow = JSON.parse(userFlow.replace(/\\"/g, '"'));
         }
 
+        let guruFlow = guruAnswer.flowchart;
+        if (typeof guruFlow === 'string') {
+          guruFlow = JSON.parse(guruFlow);
+        }
+
+        console.log(`🔍 FLOW COMPARE:`, {
+          userConditions: userFlow?.conditions?.length || 0,
+          guruConditions: guruFlow?.conditions?.length || 0
+        });
+
+        // 🔥 COMPARE CONDITIONS (FLEXIBLE tapi ketat)
+        const userConditions = Array.isArray(userFlow.conditions) ? userFlow.conditions : [];
+        const guruConditions = Array.isArray(guruFlow.conditions) ? guruFlow.conditions : [];
+
+        let conditionMatch = 0;
+        const maxConditions = Math.max(userConditions.length, guruConditions.length);
+        
+        // Check first condition exact match
+        if (userConditions[0] && guruConditions[0]) {
+          const userCond = normalizeCondition(userConditions[0].condition);
+          const guruCond = normalizeCondition(guruConditions[0].condition);
+          
+          if (userCond === guruCond) {
+            conditionMatch += 40;
+          }
+        }
+
+        // Check structure similarity
+        if (userConditions.length === guruConditions.length) {
+          conditionMatch += 30;
+        }
+        if (userConditions.some(c => c.yes?.trim())) {
+          conditionMatch += 20;
+        }
+        if (userFlow.elseInstruction?.trim() === guruFlow.elseInstruction?.trim()) {
+          conditionMatch += 10;
+        }
+
+        flowScore = Math.min(100, conditionMatch);
+        flowDetails = {
+          match: flowScore >= 90,
+          score: flowScore,
+          feedback: `✅ ${userConditions.length} kondisi (${flowScore}%)`,
+          userConditions: userConditions.length,
+          guruConditions: guruConditions.length,
+          firstMatch: conditionMatch >= 40
+        };
+
       } catch (parseErr) {
-        console.error(`❌ JSON PARSE ERROR:`, parseErr.message);
-        console.error(`RAW DATA:`, flowRaw);
-        flowDetails.feedback = `❌ Parse error: ${parseErr.message}`;
+        console.error("Flow parse error:", parseErr);
+        flowDetails.feedback = "❌ Flowchart format salah";
       }
-    } else {
-      console.log("❌ FLOW TOO SHORT");
     }
 
-    // FINAL SCORE
+    // 🔥 FINAL SCORE (60% pseudo + 40% flow)
     const totalScore = Math.round((pseudoScore * 0.6) + (flowScore * 0.4));
-    const valid = totalScore >= 75;
+    const valid = totalScore >= 85; // Naikkan threshold
 
-    console.log(`🎯 FINAL: Pseudo=${pseudoScore} Flow=${flowScore} TOTAL=${totalScore}% ${valid ? '✅ PASS' : '❌ FAIL'}`);
+    console.log(`🎯 FINAL: Pseudo=${pseudoScore}% Flow=${flowScore}% TOTAL=${totalScore}% ${valid ? '✅ PASS' : '❌ FAIL'}`);
 
     res.json({
       valid,
       score: totalScore,
       details: {
-        pseudocode: {
-          match: pseudoScore >= 80,
-          score: pseudoScore,
-          feedback: pseudoScore >= 80 ? "✅ Perfect pseudocode!" : "⚠️ Check structure"
-        },
-        flowchart: flowDetails
+        pseudocode: pseudoDetails,
+        flowchart: flowDetails,
+        guruAnswer: {
+          hasPseudo: !!guruAnswer?.pseudocode,
+          hasFlow: !!guruAnswer?.flowchart,
+          materiId: room.materiId
+        }
       }
     });
 
   } catch (error) {
-    console.error("❌ VALIDATE CRASH:", error);
+    console.error("❌ VALIDATE ERROR:", error);
     res.status(500).json({ valid: false, score: 0, error: error.message });
   }
+};
+
+// 🔥 NORMALIZE FUNCTIONS - CRUCIAL!
+const normalizePseudocode = (text) => {
+  if (!text) return "";
+  
+  return text
+    // Hapus blanks
+    .replace(/___BLANK_\d+___|\$BLANK \d+\$/gi, '')
+    // Bersihkan whitespace
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    // Hapus punctuation
+    .replace(/[;:(),]/g, ' ')
+    // Keyword variations
+    .replace(/\bIF\b/gi, 'if')
+    .replace(/\bTHEN\b/gi, 'then')
+    .replace(/\bENDIF\b/gi, 'endif')
+    .replace(/\bEND\b/gi, 'end')
+    // Trim & lowercase
+    .trim()
+    .toLowerCase();
+};
+
+const normalizeCondition = (condition) => {
+  if (!condition) return "";
+  return condition
+    .replace(/\s+/g, ' ')
+    .replace(/[()]/g, '')
+    .trim()
+    .toLowerCase();
+};
+
+// 🔥 SIMILARITY HELPER
+const calculateSimilarity = (str1, str2) => {
+  str1 = str1.toLowerCase().trim();
+  str2 = str2.toLowerCase().trim();
+  
+  if (str1.length === 0 || str2.length === 0) return 0;
+  
+  const longer = Math.max(str1.length, str2.length);
+  const matrix = [];
+  
+  for (let i = 0; i <= str1.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= str2.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= str1.length; i++) {
+    for (let j = 1; j <= str2.length; j++) {
+      if (str1.charAt(i - 1) === str2.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  
+  return 1 - (matrix[str1.length][str2.length] / longer);
 };
 
 // 🔥 VALIDASI PSEUDOCODE BARU
