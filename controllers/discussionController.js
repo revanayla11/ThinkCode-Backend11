@@ -498,44 +498,81 @@ exports.savePseudocode = async (req, res) => {
   const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
-    const { template, answers } = req.body; // 🔥 BUKAN pseudocode lagi
-
     const userId = req.user.id;
 
-    if (!template || !answers) {
+    let filledPseudocode = "";
+
+    // 🔥 FALLBACK 1: Cek template + answers (NEW FORMAT)
+    if (req.body.template && Array.isArray(req.body.answers)) {
+      filledPseudocode = fillBlanks(req.body.template, req.body.answers);
+      console.log("✅ NEW FORMAT: template + answers");
+    }
+    // 🔥 FALLBACK 2: Cek pseudocode langsung (OLD FORMAT)
+    else if (req.body.pseudocode) {
+      filledPseudocode = req.body.pseudocode.trim();
+      console.log("✅ OLD FORMAT: pseudocode direct");
+    }
+    else {
       await transaction.rollback();
-      return res.status(400).json({ message: "Template / jawaban kosong" });
+      return res.status(400).json({ message: "Data pseudocode kosong" });
     }
 
-    // 🔥 STEP 1: REPLACE BLANK
-    let filled = fillBlanks(template, answers);
-
-    // 🔥 STEP 2: NORMALIZE
-    const cleaned = filled
+    // 🔥 NORMALIZE
+    const cleaned = filledPseudocode
       .replace(/\s+/g, ' ')
       .trim();
 
-    console.log("🧪 FILLED:", filled);
-    console.log("✅ CLEANED:", cleaned);
+    console.log("🧪 SAVED:", cleaned.substring(0, 100) + "...");
 
-    // 🔥 SIMPAN HASIL FINAL (BUKAN TEMPLATE!)
+    // 🔥 SIMPAN
     await Workspace.upsert({
       roomId,
       pseudocode: cleaned
+    }, { transaction });
+
+    // Count attempts
+    const attemptCount = await WorkspaceAttempt.count({
+      where: { roomId, type: "pseudocode" },
+      transaction
+    });
+
+    await WorkspaceAttempt.create({
+      roomId,
+      type: "pseudocode",
+      attemptNumber: attemptCount + 1,
+      content: cleaned
+    }, { transaction });
+
+    await RoomTaskProgress.upsert({ 
+      roomId, 
+      taskId: 3, 
+      done: true 
     }, { transaction });
 
     await transaction.commit();
 
     res.json({
       status: true,
-      message: "✅ Pseudocode saved (FIXED)",
-      preview: cleaned
+      message: "✅ Pseudocode saved!",
+      preview: cleaned.substring(0, 100) + "...",
+      attempts: attemptCount + 1
     });
 
   } catch (err) {
     await transaction.rollback();
+    console.error("savePseudocode ERROR:", err);
     res.status(500).json({ message: err.message });
   }
+};
+
+// 🔥 HELPER FUNCTION - Tambahkan ini
+const fillBlanks = (template, answers) => {
+  let filled = template || "";
+  answers.forEach((answer, i) => {
+    const placeholder = `___BLANK_${i}___`;
+    filled = filled.replaceAll(placeholder, answer || `[BLANK ${i+1}]`);
+  });
+  return filled;
 };
 /* ================= SAVE FLOWCHART ================= */
 exports.saveFlowchart = async (req, res) => {
