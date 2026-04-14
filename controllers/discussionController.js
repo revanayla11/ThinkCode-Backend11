@@ -850,26 +850,34 @@ exports.validateWorkspace = async (req, res) => {
     const room = await DiscussionRoom.findByPk(roomId);
     const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
 
-    if (!workspace?.pseudocode?.trim()) {
-      return res.json({ valid: false, score: 0, message: "Pseudocode kosong" });
+    if (!workspace) {
+      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
     }
 
     // ================= SUPER NORMALIZER =================
     const normalize = (text) => {
       if (!text) return "";
       return text
-        .replace(/\$\s*BLANK\s*\d+\s*\$/gi, '')
-        .replace(/___BLANK_\d+___/gi, '')
-        .replace(/\$BLANK\s*\d+\$/gi, '')
+        // 🔥 CLEAN BLANKS DULU
+        .replace(/\$\s*BLANK\s*\d+\s*\$/gi, ' ')
+        .replace(/___BLANK_\d+___/gi, ' ')
+        .replace(/\$BLANK\s*\d+\$/gi, ' ')
+        // 🔥 TEXT CLEANING
         .toLowerCase()
-        .replace(/[\n\r]+/g, ' ')
+        .replace(/[\n\r\t]+/g, ' ')
         .replace(/\s+/g, ' ')
         .replace(/[,;:()"]/g, ' ')
-        .replace(/\s+/g, ' ')
+        .replace(/[:]+/g, ' ')
         .trim();
     };
 
-    // 🔥 HARDCODE JAWABAN BENAR
+    const userRaw = workspace.pseudocode || "";
+    const userPseudo = normalize(userRaw);
+    
+    console.log("🧪 RAW USER:", userRaw.substring(0, 100));
+    console.log("✅ NORM USER:", `"${userPseudo}"`);
+
+    // 🔥 HARDCODE JAWABAN BENAR MATERI 1
     const expectedRaw = `DEKLARASI
     angka : integer
 
@@ -882,71 +890,93 @@ ALGORITMA
 
 END`;
 
-    const userPseudo = normalize(workspace.pseudocode);
     const answerPseudo = normalize(expectedRaw);
+    console.log("✅ NORM ANSWER:", `"${answerPseudo}"`);
 
-    console.log("🧪 USER NORM:", `"${userPseudo}"`);
-    console.log("✅ ANS NORM:", `"${answerPseudo}"`);
-    console.log("✅ EXACT?", userPseudo === answerPseudo);
-
-    // ================= PSEUDOCODE SCORE =================
+    // ================= PSEUDOCODE VALIDATION =================
     let pseudoScore = 0;
-    let pseudoFeedback = "";
+    let pseudoMatch = false;
+    let pseudoFeedback = "❌ Struktur dasar salah";
 
+    // ✅ EXACT MATCH
     if (userPseudo === answerPseudo) {
       pseudoScore = 50;
-      pseudoFeedback = "✅ PERFECT!";
+      pseudoMatch = true;
+      pseudoFeedback = "✅ PERFECT MATCH!";
+    } 
+    // ✅ FUZZY MATCH (90% similarity)
+    else if (userPseudo.includes("deklarasi angka") && 
+             userPseudo.includes("read angka") && 
+             userPseudo.includes("if angka > 0") && 
+             userPseudo.includes("write angka adalah positif")) {
+      pseudoScore = 45;
+      pseudoMatch = true;
+      pseudoFeedback = "✅ Hampir perfect!";
+    }
+    // Partial
+    else if (userPseudo.includes("deklarasi") && 
+             userPseudo.includes("read") && 
+             userPseudo.includes("if") && 
+             userPseudo.includes("write")) {
+      pseudoScore = 35;
+      pseudoFeedback = "⚠️ Struktur OK, cek detail";
     } else {
-      // Partial scoring
-      if (userPseudo.includes("deklarasi") && userPseudo.includes("read") && 
-          userPseudo.includes("if") && userPseudo.includes("write")) {
-        pseudoScore = 40;
-        pseudoFeedback = "⚠️ Hampir benar!";
-      } else {
-        pseudoScore = 20;
-        pseudoFeedback = "❌ Perbaiki struktur dasar";
-      }
+      pseudoScore = 10;
+      pseudoFeedback = "❌ Perbaiki struktur dasar";
     }
 
-    // ================= FLOWCHART =================
+    // ================= FLOWCHART VALIDATION =================
     let flowScore = 0;
-    let flowFeedback = "❌ Belum dibuat";
-    
+    let flowMatch = false;
+    let flowFeedback = "❌ Flowchart kosong";
+
     if (workspace.flowchart) {
       try {
         const flow = JSON.parse(workspace.flowchart);
-        if (flow.conditions?.length > 0) {
-          const cond = normalize(flow.conditions[0].condition);
-          if (cond.includes(">")) {
+        const conditions = Array.isArray(flow.conditions) ? flow.conditions : [];
+        
+        console.log("🔍 FLOW Conditions:", conditions.map(c => c.condition));
+        
+        if (conditions.length > 0) {
+          const userCond = normalize(conditions[0].condition || "");
+          if (userCond.includes("angka > 0") || userCond.includes(">")) {
             flowScore = 50;
-            flowFeedback = "✅ Flowchart benar!";
+            flowMatch = true;
+            flowFeedback = "✅ Flowchart BENAR!";
           } else {
             flowScore = 25;
             flowFeedback = "⚠️ Kondisi kurang tepat";
           }
+        } else {
+          flowFeedback = "❌ Belum ada kondisi";
         }
       } catch (e) {
-        flowScore = 0;
+        console.error("Flow parse error:", e.message);
+        flowFeedback = "❌ Flowchart rusak";
       }
     }
 
+    // ================= FINAL SCORE =================
     const totalScore = pseudoScore + flowScore;
     const isValid = totalScore >= 90;
 
-    console.log(`🎯 FINAL: ${totalScore}% ${isValid ? "✅ PASS" : "❌ FAIL"}`);
+    console.log(`🎯 PSEUDO: ${pseudoScore} | FLOW: ${flowScore} | TOTAL: ${totalScore} | VALID: ${isValid}`);
 
     res.json({
       valid: isValid,
       score: totalScore,
+      
       details: {
         pseudocode: {
+          match: pseudoMatch,
           score: pseudoScore,
-          match: userPseudo === answerPseudo,
           feedback: pseudoFeedback,
-          user: userPseudo,
-          answer: answerPseudo
+          userNormalized: userPseudo,
+          answerNormalized: answerPseudo,
+          rawUser: userRaw.substring(0, 100) + "..."
         },
         flowchart: {
+          match: flowMatch,
           score: flowScore,
           feedback: flowFeedback
         }
