@@ -1,3 +1,4 @@
+const sequelize = require('../config/db');
 const DiscussionMessage = require("../models/DiscussionMessage");
 const DiscussionRoom = require("../models/DiscussionRoom");
 const User = require("../models/User");
@@ -636,115 +637,121 @@ const fillBlanks = (template, answers) => {
   return filled;
 };
 /* ================= SAVE FLOWCHART ================= */
-/* ================= SAVE FLOWCHART - BULLETPROOF VERSION ================= */
+/* ================= SAVE FLOWCHART - TEXT FIELD BULLETPROOF ================= */
 exports.saveFlowchart = async (req, res) => {
-  const transaction = await Workspace.sequelize.transaction(); // 🔥 TAMBAH TRANSACTION
+  let transaction;
   try {
-    console.log(`🔧 SAVE FLOW ${req.params.roomId} - TX MODE`);
+    console.log(`🔧 [SAVE FLOW] Room ${req.params.roomId}`);
+    
+    // 🔥 GLOBAL TRANSACTION
+    transaction = await sequelize.transaction();
     
     const roomId = parseInt(req.params.roomId);
-    let { flowchart } = req.body;
+    const { flowchart } = req.body;
 
-    // VALIDASI
-    if (!flowchart?.conditions?.[0]?.condition) {
+    console.log("📥 REQ BODY:", {
+      conditionsCount: flowchart?.conditions?.length || 0,
+      hasElse: !!flowchart?.showElse
+    });
+
+    // 🔥 VALIDASI KETAT
+    if (!flowchart?.conditions?.[0]?.condition?.trim()) {
       await transaction.rollback();
-      return res.status(400).json({ error: "No conditions" });
+      return res.status(400).json({ 
+        error: "Minimal 1 kondisi dengan teks valid",
+        received: flowchart?.conditions || []
+      });
     }
 
-    // CLEAN
+    // 🔥 CLEAN & VALIDATE
     const cleanFlow = {
-      conditions: flowchart.conditions.map(c => ({
-        condition: String(c.condition || '').trim(),
-        yes: String(c.yes || '').trim(),
-        no: String(c.no || '').trim()
-      })).filter(c => c.condition),
+      conditions: (flowchart.conditions || [])
+        .map(c => ({
+          condition: String(c.condition || '').trim(),
+          yes: String(c.yes || '').trim(),
+          no: String(c.no || '').trim()
+        }))
+        .filter(c => c.condition.length > 0), // Hapus kosong
       elseInstruction: String(flowchart.elseInstruction || '').trim(),
       showElse: !!flowchart.showElse
     };
 
-    const jsonString = JSON.stringify(cleanFlow);
-    console.log(`📝 JSON OK (${jsonString.length}):`, jsonString.substring(0, 100));
-
-    // 🔥 1. GET/CREATE WORKSPACE - BULLETPROOF
-    let workspace = await Workspace.findOne({ where: { roomId }, transaction });
-    
-    // ✅ CREATE IF NOT EXISTS
-    if (!workspace) {
-      workspace = await Workspace.create({ 
-        roomId, 
-        pseudocode: "", 
-        flowchart: "" 
-      }, { transaction });
-      console.log("✅ NEW WORKSPACE CREATED");
-    }
-
-    const pseudo = workspace.pseudocode || ""; // ✅ SAFE NOW
-
-    // 🔥 2. UPSERT - FULL SAFE
-    const [updatedRows] = await Workspace.upsert({
-      roomId,
-      pseudocode: pseudo || "",           // ✅ NULL-SAFE
-      flowchart: jsonString               // ✅ VALID JSON
-    }, { 
-      transaction,
-      returning: true                     // 🔥 GET UPDATED DATA
-    });
-
-    console.log(`✅ UPSERT: rows=${updatedRows}, flowLen=${jsonString.length}`);
-
-    // 🔥 3. VERIFY IMMEDIATE
-    const verified = await Workspace.findOne({ where: { roomId }, transaction });
-    console.log(`🔍 VERIFY:`, {
-      exists: !!verified,
-      flowLen: verified?.flowchart?.length || 0,
-      flowPreview: verified?.flowchart?.substring(0, 50),
-      pseudoLen: verified?.pseudocode?.length || 0
-    });
-
-    if (!verified?.flowchart || verified.flowchart.length < 10) {
+    if (cleanFlow.conditions.length === 0) {
       await transaction.rollback();
-      return res.status(500).json({ 
-        error: "VERIFY FAILED - flowchart NULL after upsert!",
-        debug: { roomId, jsonLen: jsonString.length, verified: !!verified }
-      });
+      return res.status(400).json({ error: "Semua kondisi kosong" });
     }
 
-    // 🔥 4. ATTEMPT COUNT
-    const attemptCount = await WorkspaceAttempt.count({ 
-      where: { roomId, type: "flowchart" }, 
-      transaction 
-    });
-    await WorkspaceAttempt.create({
-      roomId, 
-      type: "flowchart", 
-      attemptNumber: attemptCount + 1, 
-      content: jsonString
-    }, { transaction });
+    // 🔥 STRINGIFY
+    const jsonString = JSON.stringify(cleanFlow);
+    console.log(`📝 CLEAN JSON (${jsonString.length} chars):`, jsonString.substring(0, 100));
 
-    // 🔥 5. TASK PROGRESS
+    // 🔥 1. UPSERT WORKSPACE - ATOMIC & SAFE
+    const [result] = await Workspace.upsert({
+      roomId,
+      flowchart: jsonString,  // ✅ TEXT field = JSON string
+      pseudocode: sequelize.fn('COALESCE', sequelize.col('pseudocode'), '') // Keep existing
+    }, {
+      transaction,
+      returning: true
+    });
+
+    console.log(`✅ UPSERT OK:`, {
+      roomId,
+      flowchartLen: result.flowchart?.length || 0,
+      pseudocodeLen: result.pseudocode?.length || 0
+    });
+
+    // 🔥 2. IMMEDIATE VERIFY
+    const verified = await Workspace.findByPk(result.id, { transaction });
+    if (!verified.flowchart || verified.flowchart.length < 10) {
+      throw new Error(`Verify failed: flowchart len=${verified.flowchart?.length}`);
+    }
+
+    // 🔥 3. TASK 4 ✅
     await RoomTaskProgress.upsert({ 
       roomId, 
       taskId: 4, 
       done: true 
     }, { transaction });
 
+    // 🔥 4. ATTEMPT LOG
+    const attemptCount = await WorkspaceAttempt.count({
+      where: { roomId, type: "flowchart" },
+      transaction
+    });
+    await WorkspaceAttempt.create({
+      roomId,
+      type: "flowchart",
+      attemptNumber: attemptCount + 1,
+      content: jsonString.substring(0, 500) // Truncate log
+    }, { transaction });
+
     await transaction.commit();
-    console.log(`🎉 FULL SUCCESS! flowLen=${verified.flowchart.length}`);
+    
+    console.log(`🎉 FULL SUCCESS room ${roomId}: ${cleanFlow.conditions.length} conditions`);
 
     res.json({
       status: true,
-      message: `✅ Saved ${cleanFlow.conditions.length} conditions`,
-      debug: { 
-        length: verified.flowchart.length,
+      message: `✅ Flowchart tersimpan (${cleanFlow.conditions.length} kondisi)`,
+      debug: {
         conditions: cleanFlow.conditions.length,
-        pseudoPreserved: !!pseudo
+        jsonLength: jsonString.length,
+        flowchartPreview: jsonString.substring(0, 100)
       }
     });
 
   } catch (error) {
-    await transaction.rollback();
-    console.error(`💥 CRASH:`, error);
-    console.error(`REQ BODY:`, req.body);
+    if (transaction) {
+      await transaction.rollback();
+      console.error(`💥 ROLLBACK:`, error.message);
+    }
+    
+    console.error(`💥 saveFlowchart ${req.params.roomId}:`, {
+      error: error.message,
+      stack: error.stack,
+      body: req.body
+    });
+    
     res.status(500).json({ 
       error: error.message,
       debug: { roomId: req.params.roomId }
