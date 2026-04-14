@@ -494,90 +494,47 @@ exports.getTaskProgress = async (req, res) => {
 };
 
 /* ================= SAVE PSEUDOCODE - FIXED ================= */
-/* ================= SAVE PSEUDOCODE ================= */
 exports.savePseudocode = async (req, res) => {
   const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
-    let { pseudocode } = req.body;
+    const { template, answers } = req.body; // 🔥 BUKAN pseudocode lagi
+
     const userId = req.user.id;
 
-    console.log(`💾 savePseudocode room ${roomId}`);
-    console.log(`📝 Raw input (${pseudocode?.length || 0} chars):`, pseudocode?.substring(0, 200));
-
-    if (!pseudocode?.trim()) {
+    if (!template || !answers) {
       await transaction.rollback();
-      return res.status(400).json({ status: false, message: "Pseudocode kosong" });
+      return res.status(400).json({ message: "Template / jawaban kosong" });
     }
 
-    // 🔥 CRITICAL FIX: HAPUS SEMUA BLANK PLACEHOLDER
-    const cleaned = pseudocode
-      .replace(/\$BLANK\s*\d+\$/gi, '')           // [BLANK 1], [BLANK 5]
-      .replace(/___BLANK_\d+___/gi, '')           // ___BLANK_0___
-      .replace(/\s+/g, ' ')                       // Normalize spaces
+    // 🔥 STEP 1: REPLACE BLANK
+    let filled = fillBlanks(template, answers);
+
+    // 🔥 STEP 2: NORMALIZE
+    const cleaned = filled
+      .replace(/\s+/g, ' ')
       .trim();
 
-    console.log(`✅ CLEANED PSEUDOCODE (${cleaned.length} chars):`, `"${cleaned}"`);
+    console.log("🧪 FILLED:", filled);
+    console.log("✅ CLEANED:", cleaned);
 
-    // Hitung attempts
-    const attemptCount = await WorkspaceAttempt.count({
-      where: { roomId, type: "pseudocode" },
-      transaction
-    });
-
-    // 🔥 NEW ATTEMPT
-    await WorkspaceAttempt.create({
-      roomId,
-      type: "pseudocode",
-      attemptNumber: attemptCount + 1,
-      content: cleaned,
-      userId
-    }, { transaction });
-
-    // XP PENALTY - mulai attempt 6+
-    if (attemptCount + 1 > 5) {
-      const penalty = 10;
-      const room = await DiscussionRoom.findByPk(roomId, { transaction });
-      const members = await UserMateriProgress.findAll({
-        where: { materiId: room.materiId, roomId },
-        transaction
-      });
-
-      for (const member of members) {
-        if (member.xp >= penalty) {
-          member.xp -= penalty;
-          await member.save({ transaction });
-          await User.update(
-            { xp: User.sequelize.literal(`xp - ${penalty}`) },
-            { where: { id: member.userId }, transaction }
-          );
-        }
-      }
-      console.log(`⚠️ Penalty: -${penalty}XP x${members.length} members (attempt ${attemptCount + 1})`);
-    }
-
-    // Save workspace
+    // 🔥 SIMPAN HASIL FINAL (BUKAN TEMPLATE!)
     await Workspace.upsert({
       roomId,
       pseudocode: cleaned
     }, { transaction });
 
-    await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true }, { transaction });
-
     await transaction.commit();
-    
-    res.json({ 
-      status: true, 
-      attempt: attemptCount + 1,
-      cleanedLength: cleaned.length,
-      preview: cleaned.substring(0, 100) + "...",
-      message: `✅ Pseudocode saved! Attempt ${attemptCount + 1}`
+
+    res.json({
+      status: true,
+      message: "✅ Pseudocode saved (FIXED)",
+      preview: cleaned
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("❌ savePseudocode ERROR:", err);
-    res.status(500).json({ status: false, message: err.message });
+    res.status(500).json({ message: err.message });
   }
 };
 /* ================= SAVE FLOWCHART ================= */
