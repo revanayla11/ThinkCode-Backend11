@@ -479,63 +479,101 @@ exports.getTaskProgress = async (req, res) => {
   }
 };
 
-/* ================= SAVE PSEUDOCODE - FIXED ================= */
+// 🔥 TAMBAHKAN INI di ATAS savePseudocode (sebelum semua exports)
+const fillBlanks = (template, answers) => {
+  if (!template || !Array.isArray(answers)) {
+    return template || "";
+  }
+  
+  let filled = template;
+  answers.forEach((answer, index) => {
+    const placeholder = `___BLANK_${index}___`;
+    filled = filled.replaceAll(placeholder, answer || `[BLANK ${index + 1}]`);
+  });
+  
+  return filled.trim();
+};
+
 /* ================= SAVE PSEUDOCODE - KEEP FLOWCHART ✅ ================= */
 exports.savePseudocode = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
+    
+    console.log('📥 savePseudocode INPUT:', {
+      hasTemplate: !!req.body.template,
+      hasAnswers: Array.isArray(req.body.answers),
+      answersLength: req.body.answers?.length || 0,
+      hasRaw: !!req.body.pseudocode
+    });
 
-    // 🔥 GET INPUT
+    // 🔥 GET PSEUDOCODE - PRIORITY: template + answers
     let filledPseudocode = "";
+    
     if (req.body.template && Array.isArray(req.body.answers)) {
+      // ✅ FILL BLANKS MODE
       filledPseudocode = fillBlanks(req.body.template, req.body.answers);
+      console.log('✅ BLANKS FILLED:', filledPseudocode.substring(0, 100));
     } else if (req.body.pseudocode) {
+      // ✅ RAW PSEUDOCODE
       filledPseudocode = req.body.pseudocode.trim();
     } else {
-      return res.status(400).json({ error: "No pseudocode data" });
+      return res.status(400).json({ 
+        error: "No pseudocode data! Kirim template+answers atau pseudocode" 
+      });
     }
 
-    const cleaned = filledPseudocode.replace(/\s+/g, ' ').trim();
-    console.log('📝 PSEUDO:', cleaned.substring(0, 50));
+    if (!filledPseudocode.trim()) {
+      return res.status(400).json({ error: "Pseudocode kosong!" });
+    }
 
-    // 🔥 GET EXISTING - PENTING!
-    const existing = await Workspace.findOne({ where: { roomId } });
-    
-    // 🔥 UPDATE - KEEP FLOWCHART!
-    await Workspace.update({
+    const cleaned = filledPseudocode
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    console.log('📝 SAVING PSEUDO:', cleaned.substring(0, 100));
+
+    // 🔥 UPSERT WORKSPACE - KEEP FLOWCHART!
+    const [updatedCount] = await Workspace.upsert({
+      roomId,
       pseudocode: cleaned,
       updatedAt: new Date()
-    }, { where: { roomId } });
+    });
 
-    // 🔥 TASK 3 + ATTEMPT
-    await RoomTaskProgress.upsert({ roomId, taskId: 3, done: true });
+    // 🔥 TASK 3 DONE
+    await RoomTaskProgress.upsert({ 
+      roomId, 
+      taskId: 3, 
+      done: true 
+    });
     
+    // 🔥 ATTEMPT COUNT & CREATE LOG
     const attemptCount = await WorkspaceAttempt.count({ 
       where: { roomId, type: 'pseudocode' } 
     });
+    
     await WorkspaceAttempt.create({
-      roomId, type: 'pseudocode', 
+      roomId, 
+      type: 'pseudocode', 
       attemptNumber: attemptCount + 1, 
       content: cleaned
     });
 
-    // 🔥 VERIFY
-    const verify = await Workspace.findOne({ where: { roomId } });
-    console.log('✅ PSEUDO SAVE:', {
-      pseudocodeLength: verify.pseudocode?.length || 0,
-      flowchartKept: verify.flowchart?.conditions?.length || 0
-    });
+    console.log(`✅ PSEUDO #${attemptCount + 1} SAVED room ${roomId}`);
 
     res.json({
       status: true,
-      message: '✅ Pseudocode saved!',
-      preview: cleaned.substring(0, 50) + '...',
-      attempts: attemptCount + 1
+      message: `✅ Pseudocode tersimpan! (Attempt ${attemptCount + 1})`,
+      preview: cleaned.substring(0, 80) + (cleaned.length > 80 ? '...' : ''),
+      attempts: attemptCount + 1,
+      length: cleaned.length
     });
 
   } catch (error) {
-    console.error('💥 PSEUDO ERROR:', error);
-    res.status(500).json({ error: error.message });
+    console.error('💥 savePseudocode ERROR:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 /* ================= SAVE FLOWCHART - KEEP PSEUDOCODE ✅ ================= */
