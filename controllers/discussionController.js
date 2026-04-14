@@ -426,7 +426,6 @@ exports.getUserXp = async (req, res) => {
 exports.getWorkspaceData = async (req, res) => {
   try {
     const roomId = parseInt(req.params.roomId);
-
     const workspace = await Workspace.findOne({ where: { roomId } });
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
 
@@ -436,35 +435,43 @@ exports.getWorkspaceData = async (req, res) => {
       if (!taskMap[i]) taskMap[i] = false;
     }
 
-    // 🔥 FIX: SELALU PARSE JSON KE OBJECT
+    // 🔥 SUPER SAFE FLOWCHART PARSE
     let flowchartObj = { conditions: [], elseInstruction: "" };
     if (workspace?.flowchart) {
       try {
-        flowchartObj = typeof workspace.flowchart === 'string' 
+        const parsed = typeof workspace.flowchart === 'string' 
           ? JSON.parse(workspace.flowchart) 
           : workspace.flowchart;
+        
+        // ✅ VALIDATE STRUCTURE
+        flowchartObj = {
+          conditions: Array.isArray(parsed.conditions) ? parsed.conditions : [],
+          elseInstruction: parsed.elseInstruction || "",
+          showElse: !!parsed.showElse
+        };
+        
+        console.log("✅ FLOWCHART PARSED:", {
+          conditions: flowchartObj.conditions.length,
+          firstCond: flowchartObj.conditions[0]?.condition
+        });
+        
       } catch (e) {
-        console.error("Flowchart parse error:", e);
+        console.error("❌ Flowchart PARSE ERROR:", e.message, "Raw:", workspace.flowchart);
+        flowchartObj = { conditions: [], elseInstruction: "", parseError: e.message };
       }
     }
-
-    console.log("🔄 Workspace data:", {
-      pseudocode: workspace?.pseudocode ? 'OK' : 'EMPTY',
-      flowchart: flowchartObj,
-      conditionsCount: flowchartObj.conditions?.length || 0
-    });
 
     res.json({
       status: true,
       data: {
         pseudocode: workspace?.pseudocode || "",
-        flowchart: flowchartObj,  // ✅ SELALU OBJECT
+        flowchart: flowchartObj,
         tasks: taskMap
       }
     });
 
   } catch (err) {
-    console.error("getWorkspaceData:", err);
+    console.error("getWorkspaceData ERROR:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
@@ -844,157 +851,207 @@ END`,
 exports.validateWorkspace = async (req, res) => {
   try {
     const { roomId } = req.params;
-    console.log(`🔍 Validating room ${roomId}`);
+    console.log(`🔍 [VALIDATE] Room ${roomId}`);
 
-    const workspace = await Workspace.findOne({ where: { roomId: parseInt(roomId) } });
+    // 🔥 FETCH DATA
+    const [workspace, room, answer] = await Promise.all([
+      Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
+      DiscussionRoom.findByPk(roomId),
+      MateriAnswer.findOne({ where: { materiId: room?.materiId } })
+    ]);
+
     if (!workspace) {
       return res.json({ 
         valid: false, 
         score: 0, 
-        message: "Workspace belum ada",
+        message: "Workspace kosong 😢",
         details: { hasWorkspace: false }
       });
     }
 
-    const room = await DiscussionRoom.findByPk(roomId);
-    const answer = await MateriAnswer.findOne({ where: { materiId: room.materiId } });
-    
     if (!answer) {
       return res.json({ 
         valid: false, 
         score: 0, 
-        message: "Jawaban guru tidak ditemukan",
+        message: "Jawaban guru belum ada 📚",
         details: { hasAnswer: false }
       });
     }
 
-    console.log("📊 Workspace found:", !!workspace);
-    console.log("📊 Answer found:", !!answer);
-    console.log("📝 User pseudo:", workspace.pseudocode?.substring(0, 100));
-    console.log("📝 Answer pseudo:", answer.pseudocode?.substring(0, 100));
+    console.log("✅ Data OK:", {
+      workspaceId: workspace.id,
+      answerId: answer.id,
+      materiId: room.materiId
+    });
 
-    // 🔥 NORMALIZE TEXT
+    // 🔥 MASTER CLEANER FUNCTION
     const cleanText = (text) => {
       if (!text) return "";
       return text
         .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/[\$\$]/g, "")              // Hapus [ ]
-        .replace(/___BLANK_\d+___/gi, "")    // Hapus ___BLANK_X___
-        .replace(/[""]/g, "")                // Hapus quotes
+        .replace(/\s+/g, " ")                    // Single spaces
+        .replace(/[\$\$?"']/g, "")               // Remove [], ", '
+        .replace(/___BLANK_\d+___/gi, "")        // Remove blanks
+        .replace(/[?]/g, "")                     // Remove ?
+        .replace(/[^\w\s><=]+/g, " ")            // Keep logic symbols
         .trim();
     };
 
-    /* ================= PSEUDOCODE ================= */
+    /* ================================= PSEUDOCODE ================================= */
+    console.log("\n📝 === PSEUDOCODE ===");
+    console.log("Raw user:", workspace.pseudocode?.substring(0, 100));
+    console.log("Raw answer:", answer.pseudocode?.substring(0, 100));
+
     let pseudoScore = 0;
     let pseudoMatch = false;
     let pseudoFeedback = "❌ Pseudocode kosong";
 
-    if (workspace.pseudocode && answer.pseudocode) {
+    if (workspace.pseudocode?.trim() && answer.pseudocode?.trim()) {
       const userClean = cleanText(workspace.pseudocode);
       const answerClean = cleanText(answer.pseudocode);
 
-      console.log("🧹 PSEUDO CLEANED:");
-      console.log("USER:", `"${userClean}"`);
-      console.log("ANS:", `"${answerClean}"`);
+      console.log("Clean user:", `"${userClean}"`);
+      console.log("Clean answer:", `"${answerClean}"`);
 
-      // 🔥 EXACT MATCH
+      // 🔥 STRATEGY 1: EXACT MATCH
       if (userClean === answerClean) {
         pseudoScore = 50;
         pseudoMatch = true;
-        pseudoFeedback = "✅ Perfect!";
+        pseudoFeedback = "✅ PERFECT MATCH!";
       }
-      // 🔥 PARTIAL MATCH
+      // 🔥 STRATEGY 2: CONTAINS (flexible)
       else if (userClean.includes(answerClean) || answerClean.includes(userClean)) {
         pseudoScore = 50;
         pseudoMatch = true;
-        pseudoFeedback = "✅ Bagus!";
+        pseudoFeedback = "✅ Struktur benar!";
       }
-      // 🔥 KEYWORD MATCH (80%+)
+      // 🔥 STRATEGY 3: KEYWORD 80%+
       else {
         const answerWords = answerClean.split(" ").filter(w => w.length > 2);
         const userWords = userClean.split(" ");
         const matches = answerWords.filter(word => 
-          userWords.some(uw => uw.includes(word))
+          userWords.some(uw => uw.includes(word) || word.includes(uw))
         );
-        if (matches.length >= answerWords.length * 0.8) {
-          pseudoScore = 40;
+        
+        const matchPct = (matches.length / answerWords.length) * 100;
+        console.log(`Keywords: ${matches.length}/${answerWords.length} (${matchPct.toFixed(0)}%)`);
+        
+        if (matchPct >= 80) {
+          pseudoScore = 45;
           pseudoMatch = true;
           pseudoFeedback = `✅ ${matches.length}/${answerWords.length} keywords`;
         } else {
-          pseudoFeedback = `❌ ${matches.length}/${answerWords.length} keywords`;
+          pseudoFeedback = `❌ ${matches.length}/${answerWords.length} keywords (${matchPct.toFixed(0)}%)`;
         }
       }
     }
 
-    /* ================= FLOWCHART ================= */
+    /* ================================= FLOWCHART ================================= */
+    console.log("\n🔄 === FLOWCHART ===");
     let flowScore = 0;
     let flowMatch = false;
     let flowFeedback = "❌ Flowchart kosong";
 
     try {
+      // 🔥 PARSE USER FLOWCHART
       let userFlow = workspace.flowchart;
-      
-      // 🔥 SAFE PARSE
       if (typeof userFlow === "string") {
         userFlow = JSON.parse(userFlow);
       }
 
-      const answerFlow = answer.flowchart;
+      const answerFlowRaw = answer.flowchart;
+      let answerFlow = {};
       
-      console.log("🔄 FLOWCHART:");
-      console.log("User conditions:", userFlow?.conditions?.length || 0);
-      console.log("Answer conditions:", answerFlow?.conditions?.length || 0);
+      if (typeof answerFlowRaw === "string") {
+        answerFlow = JSON.parse(answerFlowRaw);
+      } else {
+        answerFlow = answerFlowRaw;
+      }
 
-      if (userFlow?.conditions && answerFlow?.conditions) {
-        const userConds = userFlow.conditions.length;
-        const answerConds = answerFlow.conditions.length;
+      // 🔥 EXTRACT CONDITIONS
+      const userConditions = Array.isArray(userFlow?.conditions) ? userFlow.conditions : [];
+      const answerConditions = Array.isArray(answerFlow?.conditions) ? answerFlow.conditions : [];
 
-        // 🔥 COUNT MATCH
-        if (userConds === answerConds && userConds > 0) {
+      console.log("User conditions:", userConditions.length);
+      console.log("User preview:", userConditions.slice(0, 2).map(c => c.condition));
+      console.log("Answer conditions:", answerConditions.length);
+      console.log("Answer preview:", answerConditions.slice(0, 2).map(c => c.condition));
+
+      // 🔥 FLOW MATCHING LOGIC
+      if (userConditions.length > 0 && answerConditions.length > 0) {
+        // STRATEGY 1: JUMLAH SAMA + ISI COCOK
+        if (userConditions.length === answerConditions.length) {
           let condMatches = 0;
           
-          userFlow.conditions.forEach((userCond, i) => {
-            if (!answerFlow.conditions[i]) return;
+          for (let i = 0; i < userConditions.length; i++) {
+            const userCond = cleanText(userConditions[i]?.condition || "");
+            const answerCond = cleanText(answerConditions[i]?.condition || "");
             
-            const userCondClean = cleanText(userCond.condition || "");
-            const answerCondClean = cleanText(answerFlow.conditions[i].condition || "");
+            console.log(`Cond ${i}: "${userCond}" vs "${answerCond}"`);
             
-            if (userCondClean === answerCondClean || 
-                userCondClean.includes(answerCondClean)) {
+            if (userCond === answerCond || 
+                userCond.includes(answerCond) || 
+                answerCond.includes(userCond)) {
               condMatches++;
             }
-          });
-
-          console.log(`Conditions match: ${condMatches}/${answerConds}`);
+          }
           
-          if (condMatches >= answerConds * 0.8) {
+          const matchPct = (condMatches / answerConditions.length) * 100;
+          console.log(`Condition match: ${condMatches}/${answerConditions.length} (${matchPct.toFixed(0)}%)`);
+          
+          if (matchPct >= 80) {
             flowScore = 50;
             flowMatch = true;
-            flowFeedback = `✅ ${condMatches}/${answerConds} kondisi benar`;
+            flowFeedback = `✅ ${condMatches}/${answerConditions.length} kondisi benar`;
           }
         }
-
-        // 🔥 ELSE CHECK
-        if (!flowMatch && answerFlow.elseInstruction) {
-          const userElse = cleanText(userFlow.elseInstruction || "");
-          const answerElse = cleanText(answerFlow.elseInstruction || "");
+        
+        // STRATEGY 2: JUMLAH MINIMAL COCOK (kalau materi sederhana)
+        if (!flowMatch && userConditions.length >= 1 && answerConditions.length >= 1) {
+          let anyMatch = false;
+          for (const userCond of userConditions) {
+            const userClean = cleanText(userCond.condition || "");
+            for (const ansCond of answerConditions) {
+              const ansClean = cleanText(ansCond.condition || "");
+              if (userClean === ansClean || userClean.includes(ansClean)) {
+                anyMatch = true;
+                break;
+              }
+            }
+            if (anyMatch) break;
+          }
           
-          if (userElse === answerElse && userElse) {
+          if (anyMatch) {
             flowScore = 50;
             flowMatch = true;
-            flowFeedback = "✅ ELSE benar!";
+            flowFeedback = "✅ Ada kondisi yang cocok!";
           }
         }
       }
-    } catch (e) {
-      flowFeedback = `❌ Parse error: ${e.message}`;
+
+      // STRATEGY 3: ELSE INSTRUCTION
+      if (!flowMatch && answerFlow.elseInstruction) {
+        const userElse = cleanText(userFlow?.elseInstruction || "");
+        const answerElse = cleanText(answerFlow.elseInstruction || "");
+        
+        if (userElse === answerElse && userElse.trim().length > 0) {
+          flowScore = 50;
+          flowMatch = true;
+          flowFeedback = "✅ ELSE instruction benar!";
+        }
+      }
+
+    } catch (flowError) {
+      console.error("❌ Flowchart error:", flowError.message);
+      flowFeedback = `❌ Parse error: ${flowError.message}`;
     }
 
+    /* ================================= FINAL SCORE ================================= */
     const totalScore = pseudoScore + flowScore;
+    const isValid = totalScore >= 90;
 
     const result = {
-      valid: totalScore >= 90,
+      valid: isValid,
       score: totalScore,
       details: {
         pseudocodeMatch: pseudoMatch,
@@ -1003,46 +1060,30 @@ exports.validateWorkspace = async (req, res) => {
         flowScore,
         pseudoFeedback,
         flowFeedback,
-        userPreview: workspace.pseudocode?.substring(0, 80),
-        answerPreview: answer.pseudocode?.substring(0, 80)
+        debug: {
+          userPseudoPreview: workspace.pseudocode?.substring(0, 80) || "EMPTY",
+          answerPseudoPreview: answer.pseudocode?.substring(0, 80) || "EMPTY",
+          userConditionsCount: userConditions?.length || 0,
+          answerConditionsCount: answerConditions?.length || 0
+        }
       }
     };
 
-    console.log("🎯 FINAL RESULT:", result);
+    console.log("🎯 === FINAL RESULT ===");
+    console.log("Score:", totalScore, "%", isValid ? "✅ PASS" : "❌ FAIL");
+    console.log("Pseudo:", pseudoScore, pseudoMatch ? "✅" : "❌");
+    console.log("Flow:", flowScore, flowMatch ? "✅" : "❌");
+    
     res.json(result);
 
   } catch (error) {
-    console.error("💥 validateWorkspace CRASH:", error);
+    console.error("💥 [CRASH] validateWorkspace:", error);
     res.status(500).json({ 
       valid: false, 
       score: 0, 
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
-  }
-};
-
-// 🔥 DEBUG ENDPOINT - Tambah ini
-exports.debugRoom = async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    
-    const [workspace, room] = await Promise.all([
-      Workspace.findOne({ where: { roomId: parseInt(roomId) } }),
-      DiscussionRoom.findByPk(roomId)
-    ]);
-    
-    res.json({
-      roomId,
-      roomExists: !!room,
-      roomMateriId: room?.materiId,
-      workspaceExists: !!workspace,
-      hasPseudo: !!workspace?.pseudocode?.trim(),
-      hasFlow: !!workspace?.flowchart,
-      flowParsed: workspace?.flowchart ? 
-        (typeof workspace.flowchart === 'string' ? 'JSON string OK' : 'Object OK') : 'No flowchart'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 };
 
