@@ -1,16 +1,13 @@
-'use strict';
-
 module.exports = {
-  async up(queryInterface, Sequelize) {
+  up: async (queryInterface, Sequelize) => {
     await queryInterface.changeColumn('workspaces', 'flowchart', {
-      type: Sequelize.TEXT,
+      type: Sequelize.JSON,
       allowNull: true
     });
   },
-
-  async down(queryInterface, Sequelize) {
+  down: async (queryInterface, Sequelize) => {
     await queryInterface.changeColumn('workspaces', 'flowchart', {
-      type: Sequelize.JSON,
+      type: Sequelize.TEXT,
       allowNull: true
     });
   }
