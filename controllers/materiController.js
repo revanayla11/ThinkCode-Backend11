@@ -81,8 +81,8 @@ exports.getMateriDetail = async (req, res) => {
       order: [["order", "ASC"]]
     });
 
-    const videoSection = sections.find(s => s.type === "video" && s.content);
-    const miniLesson = sections.find(s => s.type === "mini");
+    const videoSection = sections?.find(s => s.type === "video" && s.content) || null;
+    const miniLesson = sections?.find(s => s.type === "mini") || null;
 
     const safeParse = (data) => {
       try {
