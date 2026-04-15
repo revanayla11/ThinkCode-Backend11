@@ -520,7 +520,6 @@ const fillBlanks = (template, answers) => {
 };
 
 /* ================= SAVE PSEUDOCODE ================= */
-/* ================= SAVE PSEUDOCODE ================= */
 exports.savePseudocode = async (req, res) => {
   const transaction = await Workspace.sequelize.transaction();
   try {
@@ -575,7 +574,7 @@ exports.savePseudocode = async (req, res) => {
       done: true 
     }, { transaction });
     
-    // 🔥 ATTEMPT COUNT & CREATE LOG
+    // 🔥 ATTEMPT COUNT & CREATE LOG - DULU!
     const attemptCount = await WorkspaceAttempt.count({ 
       where: { roomId, type: 'pseudocode' }, 
       transaction 
@@ -588,7 +587,7 @@ exports.savePseudocode = async (req, res) => {
       content: cleaned
     }, { transaction });
 
-    // 🔥 🔥 NEW: APPLY ATTEMPT PENALTY XP
+    // 🔥 🔥 FIXED: APPLY PENALTY SETELAH ATTEMPT DIBUAT
     const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
     console.log(`🎯 PSEUDO PENALTY room ${roomId}:`, penaltyResult);
 
@@ -616,7 +615,6 @@ exports.savePseudocode = async (req, res) => {
   }
 };
 
-/* ================= SAVE FLOWCHART ================= */
 /* ================= SAVE FLOWCHART ================= */
 exports.saveFlowchart = async (req, res) => {
   console.log('🚀 saveFlowchart START');
@@ -671,7 +669,7 @@ exports.saveFlowchart = async (req, res) => {
       done: true 
     }, { transaction });
 
-    // 🔥 ATTEMPT
+    // 🔥 ATTEMPT - DULU!
     const attemptCount = await WorkspaceAttempt.count({ 
       where: { roomId, type: 'flowchart' }, 
       transaction 
@@ -684,7 +682,7 @@ exports.saveFlowchart = async (req, res) => {
       content: JSON.stringify(cleanFlow)
     }, { transaction });
 
-    // 🔥 🔥 NEW: APPLY ATTEMPT PENALTY XP
+    // 🔥 🔥 FIXED: APPLY PENALTY SETELAH ATTEMPT DIBUAT
     const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
 
     // 🔥 VERIFY SAVE
@@ -1479,12 +1477,12 @@ exports.markRoomSubmitted = async (req, res) => {
 };
 
 /* ================= ATTEMPT PENALTY XP ================= */
-/* ================= ATTEMPT PENALTY XP (SAMA PERSIS KAYAK CLUE) ================= */
+/* ================= ATTEMPT PENALTY XP (FIXED) ================= */
 exports.applyAttemptPenalty = async (roomId, transaction = null) => {
   try {
     console.log(`🎯 CHECKING PENALTY for room ${roomId}`);
     
-    // 🔥 COUNT TOTAL ATTEMPTS (PSEUDO + FLOWCHART)
+    // 🔥 COUNT TOTAL ATTEMPTS
     const [pseudoAttempts, flowchartAttempts] = await Promise.all([
       WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" }, transaction }),
       WorkspaceAttempt.count({ where: { roomId, type: "flowchart" }, transaction })
@@ -1493,7 +1491,7 @@ exports.applyAttemptPenalty = async (roomId, transaction = null) => {
     const totalAttempts = pseudoAttempts + flowchartAttempts;
     console.log(`📊 TOTAL ATTEMPTS: ${totalAttempts} (pseudo: ${pseudoAttempts}, flowchart: ${flowchartAttempts})`);
     
-    // 🔥 PENALTY TIERS ( >3: -5XP, >5: -10XP, >10: -25XP )
+    // 🔥 PENALTY TIERS
     let penaltyXP = 0;
     let tier = 'Safe';
     if (totalAttempts > 10) {
@@ -1517,7 +1515,7 @@ exports.applyAttemptPenalty = async (roomId, transaction = null) => {
       };
     }
 
-    // 🔥 GET ROOM & MEMBERS (SAMA PERSIS KAYAK CLUE)
+    // 🔥 GET ROOM & MEMBERS
     const room = await DiscussionRoom.findByPk(roomId, { transaction });
     if (!room) {
       return { applied: false, error: 'Room not found' };
@@ -1532,73 +1530,77 @@ exports.applyAttemptPenalty = async (roomId, transaction = null) => {
       return { applied: false, message: 'Tidak ada anggota di room' };
     }
 
-    // 🔥 POTONG XP SEMUA MEMBER (SAMA PERSIS KAYAK CLUE)
+    // 🔥 🔥 FIX: POTONG XP SEMUA MEMBER SEKALIGUS - TANPA CHECK SATU-SATU
     const results = [];
     let allSuccess = true;
     
     for (const member of members) {
-      // Sync XP dulu (sama kayak clue)
-      await exports.syncUserXp(member.userId, room.materiId, transaction);
-      await member.reload({ transaction });
+      try {
+        // 🔥 SYNC XP DARI USER TABLE
+        await exports.syncUserXp(member.userId, room.materiId, transaction);
+        await member.reload({ transaction });
 
-      if (member.xp < penaltyXP) {
-        console.log(`⚠️ User ${member.userId} XP tidak cukup: ${member.xp} < ${penaltyXP}`);
+        // 🔥 CEK XP CUKUP
+        if (member.xp < penaltyXP) {
+          console.log(`⚠️ User ${member.userId} XP tidak cukup: ${member.xp} < ${penaltyXP}`);
+          allSuccess = false;
+          continue;
+        }
+
+        // 🔥 POTONG XP DI UserMateriProgress
+        const beforeXP = member.xp;
+        member.xp -= penaltyXP;
+        await member.save({ transaction });
+
+        // 🔥 POTONG XP DI User TABLE - ATOMIK
+        const [updatedUserCount] = await User.update(
+          { xp: User.sequelize.literal(`xp - ${penaltyXP}`) },
+          { where: { id: member.userId }, transaction }
+        );
+
+        if (updatedUserCount > 0) {
+          results.push({
+            userId: member.userId,
+            beforeXP,
+            afterXP: member.xp,
+            penalty: penaltyXP
+          });
+          console.log(`💸 [${tier}] User ${member.userId}: ${beforeXP}XP → ${member.xp}XP (-${penaltyXP}XP)`);
+        }
+      } catch (memberError) {
+        console.error(`💥 Penalty error user ${member.userId}:`, memberError);
         allSuccess = false;
-        continue;
       }
-
-      // 🔥 POTONG XP DI UserMateriProgress
-      member.xp -= penaltyXP;
-      await member.save({ transaction });
-
-      // 🔥 POTONG XP DI User TABLE (SAMA PERSIS KAYAK CLUE)
-      await User.update(
-        { xp: User.sequelize.literal(`xp - ${penaltyXP}`) },
-        { where: { id: member.userId }, transaction }
-      );
-
-      results.push({
-        userId: member.userId,
-        name: (await User.findByPk(member.userId, { attributes: ['name'], transaction }))?.name || 'Unknown',
-        beforeXP: member.xp + penaltyXP,
-        afterXP: member.xp,
-        penalty: penaltyXP
-      });
-      
-      console.log(`💸 [${tier}] -${penaltyXP}XP → ${results[results.length-1].name} (${member.xp}XP left)`);
     }
 
-    // 🔥 KIRIM ALERT KE ROOM CHAT (BUAT SEMUA MEMBER TAU!)
-    if (results.length > 0 && allSuccess) {
-      const userId = results[0].userId; // Ambil userId pertama
-      
+    // 🔥 KIRIM ALERT KE ROOM CHAT - SELALU KIRIM JIKA ADA YANG KEKENA
+    if (results.length > 0) {
       await DiscussionMessage.create({
         roomId,
         userId: 1, // System user
         type: "system",
-        message: `🚨 ATTEMPT PENALTY!\n💥 Total attempts: ${totalAttempts}\n⚡ ${tier} Penalty: -${penaltyXP}XP per member\n📉 ${results.length} anggota kena potong XP!`
+        message: `🚨 ATTEMPT PENALTY!\n💥 Total attempts: ${totalAttempts}\n⚡ ${tier} Penalty: **-${penaltyXP}XP** per member\n📉 ${results.length}/${members.length} anggota kena potong XP!\n\n⚠️ **Tips:** Kerjakan semua task dulu sebelum submit!`
       }, { transaction });
 
-      console.log(`🔔 ALERT SENT: ${tier} penalty (${penaltyXP}XP) ke ${results.length} members`);
+      console.log(`🔔 ALERT SENT: ${tier} penalty (${penaltyXP}XP) ke ${results.length}/${members.length} members`);
     }
 
     return { 
-      applied: allSuccess && results.length > 0,
+      applied: results.length > 0,
       penaltyXP, 
       totalAttempts, 
       tier,
       affectedMembers: results.length,
       totalMembers: members.length,
-      details: results,
-      alertSent: results.length > 0,
-      message: allSuccess ? 
+      successRate: `${Math.round((results.length/members.length)*100)}%`,
+      message: results.length > 0 ? 
         `✅ ${tier} Penalty ${penaltyXP}XP diterapkan ke ${results.length}/${members.length} members!` : 
-        `⚠️ Penalty parsial - beberapa member XP tidak cukup`
+        `⚠️ Penalty gagal - cek XP member`
     };
     
   } catch (error) {
     console.error('💥 applyAttemptPenalty ERROR:', error);
-    throw error;
+    return { applied: false, error: error.message };
   }
 };
 
