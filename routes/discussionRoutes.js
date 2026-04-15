@@ -44,4 +44,7 @@ router.post('/room/:roomId/debug', auth, verifyToken, discussionController.debug
 router.get('/room/:roomId/debug-validation', auth, verifyToken, discussionController.debugValidation);
 router.get('/room/:roomId/workspace-attempts', auth, verifyToken, discussionController.getWorkspaceAttempts);
 
+// routes/discussion.js
+router.post('/room/:roomId/submit', verifyToken, discussionController.markRoomSubmitted);
+
 module.exports = router;

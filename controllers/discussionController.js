@@ -1401,4 +1401,26 @@ exports.testFillBlanks = async (req, res) => {
   }
 };
 
+// Di discussionController.js
+exports.markRoomSubmitted = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    await DiscussionRoom.update(
+      { isSubmitted: true }, 
+      { where: { id: roomId } }
+    );
+    
+    // Update semua member tasks
+    await RoomTaskProgress.upsert({ roomId, taskId: 5, done: true });
+    
+    res.json({ 
+      status: true, 
+      message: "Room marked as submitted" 
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 module.exports = exports;
