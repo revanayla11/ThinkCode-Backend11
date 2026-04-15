@@ -36,6 +36,7 @@ exports.syncUserXp = async (userId, materiId, transaction = null) => {
 };
 
 /* ================= PERFORMANCE SCORING ================= */
+/* ================= PERFORMANCE SCORING ================= */
 exports.getRoomPerformance = async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -63,12 +64,28 @@ exports.getRoomPerformance = async (req, res) => {
     score += taskBonus;
     score = Math.max(0, Math.min(100, score));
 
+    // 🔥 🔥 NEW: PENALTY XP TIER INFO
+    let xpPenaltyTier = 'Safe (0XP)';
+    let nextXPPenalty = 0;
+    if (totalAttempts > 10) {
+      xpPenaltyTier = 'Extreme (-25XP)';
+      nextXPPenalty = 25;
+    } else if (totalAttempts > 5) {
+      xpPenaltyTier = 'High (-10XP)';
+      nextXPPenalty = 10;
+    } else if (totalAttempts > 3) {
+      xpPenaltyTier = 'Medium (-5XP)';
+      nextXPPenalty = 5;
+    }
+
     console.log(`📊 Performance room ${roomId}:`, {
       usedClues,
       totalAttempts,
       attemptsAbove5,
       allTasksDone,
-      score: Math.round(score)
+      score: Math.round(score),
+      xpPenaltyTier,
+      nextXPPenalty
     });
 
     res.json({
@@ -86,6 +103,13 @@ exports.getRoomPerformance = async (req, res) => {
         cluePenalty,
         attemptPenalty,
         taskBonus
+      },
+      // 🔥 NEW: XP PENALTY INFO
+      xpPenalty: {
+        tier: xpPenaltyTier,
+        totalAttempts,
+        nextPenalty: nextXPPenalty,
+        warning: totalAttempts > 3 ? `⚠️ Next attempt: -${nextXPPenalty}XP per member!` : '✅ Safe zone'
       }
     });
   } catch (error) {
@@ -496,7 +520,9 @@ const fillBlanks = (template, answers) => {
 };
 
 /* ================= SAVE PSEUDOCODE ================= */
+/* ================= SAVE PSEUDOCODE ================= */
 exports.savePseudocode = async (req, res) => {
+  const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
     
@@ -508,7 +534,7 @@ exports.savePseudocode = async (req, res) => {
     });
 
     // 🔥 GET PSEUDOCODE - PRIORITY: template + answers
-       let filledPseudocode = "";
+    let filledPseudocode = "";
     
     if (req.body.template && Array.isArray(req.body.answers)) {
       // ✅ FILL BLANKS MODE
@@ -518,12 +544,14 @@ exports.savePseudocode = async (req, res) => {
       // ✅ RAW PSEUDOCODE
       filledPseudocode = req.body.pseudocode.trim();
     } else {
+      await transaction.rollback();
       return res.status(400).json({ 
         error: "No pseudocode data! Kirim template+answers atau pseudocode" 
       });
     }
 
     if (!filledPseudocode.trim()) {
+      await transaction.rollback();
       return res.status(400).json({ error: "Pseudocode kosong!" });
     }
 
@@ -538,18 +566,19 @@ exports.savePseudocode = async (req, res) => {
       roomId,
       pseudocode: cleaned,
       updatedAt: new Date()
-    });
+    }, { transaction });
 
     // 🔥 TASK 3 DONE
     await RoomTaskProgress.upsert({ 
       roomId, 
       taskId: 3, 
       done: true 
-    });
+    }, { transaction });
     
     // 🔥 ATTEMPT COUNT & CREATE LOG
     const attemptCount = await WorkspaceAttempt.count({ 
-      where: { roomId, type: 'pseudocode' } 
+      where: { roomId, type: 'pseudocode' }, 
+      transaction 
     });
     
     await WorkspaceAttempt.create({
@@ -557,7 +586,13 @@ exports.savePseudocode = async (req, res) => {
       type: 'pseudocode', 
       attemptNumber: attemptCount + 1, 
       content: cleaned
-    });
+    }, { transaction });
+
+    // 🔥 🔥 NEW: APPLY ATTEMPT PENALTY XP
+    const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
+    console.log(`🎯 PSEUDO PENALTY room ${roomId}:`, penaltyResult);
+
+    await transaction.commit();
 
     console.log(`✅ PSEUDO #${attemptCount + 1} SAVED room ${roomId}`);
 
@@ -566,10 +601,13 @@ exports.savePseudocode = async (req, res) => {
       message: `✅ Pseudocode tersimpan! (Attempt ${attemptCount + 1})`,
       preview: cleaned.substring(0, 80) + (cleaned.length > 80 ? '...' : ''),
       attempts: attemptCount + 1,
-      length: cleaned.length
+      length: cleaned.length,
+      // 🔥 NEW PENALTY INFO
+      penalty: penaltyResult
     });
 
   } catch (error) {
+    await transaction.rollback();
     console.error('💥 savePseudocode ERROR:', error);
     res.status(500).json({ 
       error: error.message,
@@ -579,9 +617,11 @@ exports.savePseudocode = async (req, res) => {
 };
 
 /* ================= SAVE FLOWCHART ================= */
+/* ================= SAVE FLOWCHART ================= */
 exports.saveFlowchart = async (req, res) => {
   console.log('🚀 saveFlowchart START');
   
+  const transaction = await Workspace.sequelize.transaction();
   try {
     const roomId = parseInt(req.params.roomId);
     const { flowchart } = req.body;
@@ -589,8 +629,9 @@ exports.saveFlowchart = async (req, res) => {
     console.log('📥 FLOWCHART:', JSON.stringify(flowchart, null, 2));
 
     // 🔥 GET EXISTING WORKSPACE
-    const existing = await Workspace.findOne({ where: { roomId } });
+    const existing = await Workspace.findOne({ where: { roomId }, transaction });
     if (!existing) {
+      await transaction.rollback();
       return res.status(400).json({ error: 'Workspace not found' });
     }
 
@@ -610,6 +651,7 @@ exports.saveFlowchart = async (req, res) => {
     };
 
     if (cleanFlow.conditions.length === 0) {
+      await transaction.rollback();
       return res.status(400).json({ error: 'No valid conditions' });
     }
 
@@ -618,31 +660,41 @@ exports.saveFlowchart = async (req, res) => {
       flowchart: cleanFlow,
       updatedAt: new Date()
     }, { 
-      where: { roomId } 
+      where: { roomId }, 
+      transaction
     });
 
     // 🔥 TASK 4
     await RoomTaskProgress.upsert({ 
-      roomId, taskId: 4, done: true 
-    });
+      roomId, 
+      taskId: 4, 
+      done: true 
+    }, { transaction });
 
     // 🔥 ATTEMPT
     const attemptCount = await WorkspaceAttempt.count({ 
-      where: { roomId, type: 'flowchart' } 
+      where: { roomId, type: 'flowchart' }, 
+      transaction 
     });
     
     await WorkspaceAttempt.create({
-      roomId, type: 'flowchart', 
+      roomId, 
+      type: 'flowchart', 
       attemptNumber: attemptCount + 1, 
       content: JSON.stringify(cleanFlow)
-    });
+    }, { transaction });
+
+    // 🔥 🔥 NEW: APPLY ATTEMPT PENALTY XP
+    const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
 
     // 🔥 VERIFY SAVE
-    const verify = await Workspace.findOne({ where: { roomId } });
+    const verify = await Workspace.findOne({ where: { roomId }, transaction });
     console.log('✅ DB AFTER SAVE:', {
       pseudocodeLength: verify.pseudocode?.length || 0,
       flowchartConditions: verify.flowchart?.conditions?.length || 0
     });
+
+    await transaction.commit();
 
     res.json({
       status: true,
@@ -650,11 +702,14 @@ exports.saveFlowchart = async (req, res) => {
       data: {
         pseudocodeKept: !!existing.pseudocode,
         conditions: cleanFlow.conditions.length,
-        attempts: attemptCount + 1
+        attempts: attemptCount + 1,
+        // 🔥 NEW PENALTY INFO
+        penalty: penaltyResult
       }
     });
 
   } catch (error) {
+    await transaction.rollback();
     console.error('💥 ERROR:', error.message);
     res.status(500).json({ error: error.message });
   }
@@ -1420,6 +1475,120 @@ exports.markRoomSubmitted = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ================= ATTEMPT PENALTY XP ================= */
+exports.applyAttemptPenalty = async (roomId, transaction = null) => {
+  try {
+    console.log(`🎯 CHECKING PENALTY for room ${roomId}`);
+    
+    // 🔥 COUNT TOTAL ATTEMPTS
+    const [pseudoAttempts, flowchartAttempts] = await Promise.all([
+      WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" }, transaction }),
+      WorkspaceAttempt.count({ where: { roomId, type: "flowchart" }, transaction })
+    ]);
+    
+    const totalAttempts = pseudoAttempts + flowchartAttempts;
+    console.log(`📊 TOTAL ATTEMPTS: ${totalAttempts} (pseudo: ${pseudoAttempts}, flowchart: ${flowchartAttempts})`);
+    
+    // 🔥 PENALTY TIERS
+    let penaltyXP = 0;
+    if (totalAttempts > 10) penaltyXP = 25;
+    else if (totalAttempts > 5) penaltyXP = 10;
+    else if (totalAttempts > 3) penaltyXP = 5;
+    
+    if (penaltyXP === 0) {
+      console.log('✅ No penalty needed');
+      return { applied: false, penaltyXP: 0, totalAttempts };
+    }
+    
+    // 🔥 GET ROOM MEMBERS
+    const room = await DiscussionRoom.findByPk(roomId, { transaction });
+    if (!room) return { applied: false, error: 'Room not found' };
+    
+    const members = await UserMateriProgress.findAll({
+      where: { materiId: room.materiId, roomId },
+      transaction,
+    });
+    
+    if (!members.length) {
+      console.log('⚠️ No members found');
+      return { applied: false, penaltyXP: 0, totalAttempts };
+    }
+    
+    // 🔥 APPLY PENALTY TO ALL MEMBERS
+    const results = [];
+    for (const member of members) {
+      if (member.xp >= penaltyXP) {
+        await member.update({ xp: member.xp - penaltyXP }, { transaction });
+        
+        // Sync to User table
+        await User.update(
+          { xp: User.sequelize.literal(`xp - ${penaltyXP}`) },
+          { where: { id: member.userId }, transaction }
+        );
+        
+        results.push({
+          userId: member.userId,
+          beforeXP: member.xp + penaltyXP,
+          afterXP: member.xp,
+          penalty: penaltyXP
+        });
+        
+        console.log(`💸 PENALTY ${penaltyXP}XP → User ${member.userId} (${member.xp}XP left)`);
+      }
+    }
+    
+    console.log(`✅ PENALTY APPLIED: ${penaltyXP}XP to ${results.length}/${members.length} members`);
+    return { 
+      applied: true, 
+      penaltyXP, 
+      totalAttempts, 
+      affectedMembers: results.length,
+      details: results 
+    };
+    
+  } catch (error) {
+    console.error('💥 applyAttemptPenalty ERROR:', error);
+    throw error;
+  }
+};
+
+/* ================= CHECK PENALTY STATUS ================= */
+exports.checkAttemptPenalty = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    const [pseudo, flowchart] = await Promise.all([
+      WorkspaceAttempt.count({ where: { roomId, type: "pseudocode" } }),
+      WorkspaceAttempt.count({ where: { roomId, type: "flowchart" } })
+    ]);
+    
+    const total = pseudo + flowchart;
+    let penaltyXP = 0;
+    if (total > 10) penaltyXP = 25;
+    else if (total > 5) penaltyXP = 10;
+    else if (total > 3) penaltyXP = 5;
+    
+    const room = await DiscussionRoom.findByPk(roomId);
+    const members = await UserMateriProgress.findAll({
+      where: { materiId: room.materiId, roomId }
+    });
+    
+    res.json({
+      status: true,
+      totalAttempts: total,
+      pseudocode: pseudo,
+      flowchart: flowchart,
+      nextPenaltyXP: penaltyXP,
+      membersXP: members.map(m => ({ userId: m.userId, xp: m.xp })),
+      warning: total > 3 ? `⚠️ Next attempt: -${penaltyXP}XP per member!` : '✅ Safe zone'
+    });
+    
+  } catch (error) {
+    console.error('checkAttemptPenalty error:', error);
+    res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
