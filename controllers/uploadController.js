@@ -7,7 +7,6 @@ const User = require("../models/User");
 const Materi = require("../models/Materi");
 const UserMateriProgress = require("../models/UserMateriProgress");
 const DiscussionRoom = require("../models/DiscussionRoom");
-const User = require("../models/User");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) =>
