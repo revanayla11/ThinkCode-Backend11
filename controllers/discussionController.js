@@ -456,16 +456,24 @@ exports.getWorkspaceData = async (req, res) => {
   }
 };
 
+// 🔥 TAMBAH INI - SUDAH ADA TAPI PASTIKAN ROUTES
 exports.getTaskProgress = async (req, res) => {
   try {
     const { roomId } = req.params;
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
-    const taskMap = {};
-    tasks.forEach(t => { taskMap[t.taskId] = t.done; });
-    for (let i = 1; i <= 5; i++) {
-      if (!taskMap[i]) taskMap[i] = false;
-    }
-    res.json({ status: true, data: taskMap });
+    
+    // INIT 5 TASKS
+    const taskMap = {1: false, 2: false, 3: false, 4: false, 5: false};
+    tasks.forEach(t => { 
+      taskMap[t.taskId] = t.done; 
+    });
+    
+    console.log(`📋 TASKS ${roomId}:`, taskMap);
+    
+    res.json({ 
+      status: true, 
+      data: taskMap 
+    });
   } catch (err) {
     console.error("getTaskProgress:", err);
     res.status(500).json({ status: false, message: "Server error" });
@@ -1036,31 +1044,70 @@ exports.validateWorkspace = async (req, res) => {
       Workspace.findOne({ where: { roomId: parseInt(roomId) } })
     ]);
 
-    console.log(`🔍 ROOM FOUND:`, !!room, `WORKSPACE FOUND:`, !!workspace);
-
     if (!room) {
-      console.log("❌ NO ROOM");
       return res.status(404).json({ valid: false, score: 0, error: "Room not found" });
     }
     
     if (!workspace) {
-      console.log("❌ NO WORKSPACE");
       return res.json({ valid: false, score: 0, message: "Workspace kosong" });
     }
 
-    console.log(`🔍 MATERI ID: ${room.materiId}`);
-    console.log(`🔍 PSEUDO LEN: ${workspace.pseudocode?.length || 0}`);
-    console.log(`🔍 FLOW CONDITIONS: ${workspace.flowchart?.conditions?.length || 0}`);
+    const materiId = room.materiId;
+    const expected = getExpectedAnswerByMateri(materiId);
+    
+    // 🔥 PSEUDOCODE VALIDATION
+    const userPseudoNorm = normalizePseudocode(workspace.pseudocode);
+    const expectedPseudoNorm = normalizePseudocode(expected.pseudocode);
+    const pseudoSimilarity = calculateSimilarity(userPseudoNorm, expectedPseudoNorm) * 100;
+    
+    // 🔥 FLOWCHART VALIDATION
+    let flowchartScore = 0;
+    if (workspace.flowchart && Array.isArray(workspace.flowchart.conditions)) {
+      const userConditions = workspace.flowchart.conditions;
+      const expectedConditions = expected.flowchart.conditions || [];
+      
+      let conditionMatches = 0;
+      userConditions.forEach((userCond, i) => {
+        if (i < expectedConditions.length) {
+          const condSim = calculateSimilarity(
+            normalizeCondition(userCond.condition), 
+            normalizeCondition(expectedConditions[i].condition)
+          );
+          if (condSim > 0.7) conditionMatches++;
+        }
+      });
+      
+      flowchartScore = (conditionMatches / Math.max(userConditions.length, expectedConditions.length)) * 100;
+    }
 
-    // ... rest of validation logic sama
+    const finalScore = Math.round((pseudoSimilarity * 0.6 + flowchartScore * 0.4));
+    const isValid = finalScore >= 80;
+
+    console.log(`✅ VALIDATION RESULT:`, {
+      pseudoSimilarity: pseudoSimilarity.toFixed(1),
+      flowchartScore: flowchartScore.toFixed(1),
+      finalScore,
+      isValid
+    });
+
+    res.json({
+      valid: isValid,
+      score: finalScore,
+      details: {
+        pseudocodeSimilarity: pseudoSimilarity.toFixed(1),
+        flowchartScore: flowchartScore.toFixed(1),
+        pseudocodeMatch: userPseudoNorm === expectedPseudoNorm,
+        hasFlowchart: !!workspace.flowchart,
+        conditionsCount: workspace.flowchart?.conditions?.length || 0
+      }
+    });
 
   } catch (error) {
-    console.error("💥 VALIDATE CRASH:", error.message, error.stack);
+    console.error("💥 VALIDATE ERROR:", error);
     res.status(500).json({ 
       valid: false, 
       score: 0, 
-      error: error.message,
-      debug: "Check server logs" 
+      error: "Validation timeout - coba lagi" 
     });
   }
 };
