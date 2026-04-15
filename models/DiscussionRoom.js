@@ -41,7 +41,5 @@ const DiscussionRoom = sequelize.define(
     timestamps: false
   }
 );
-Submission.belongsTo(DiscussionRoom, { foreignKey: "roomId" });
-DiscussionRoom.hasMany(Submission, { foreignKey: "roomId" });
 
 module.exports = DiscussionRoom;

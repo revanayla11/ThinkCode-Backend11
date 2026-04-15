@@ -1,9 +1,13 @@
+const { Op } = require('sequelize');
 const multer = require("multer");
 const path = require("path");
 const Submission = require("../models/Submission");
 const Badge = require("../models/Badge");
 const User = require("../models/User");
 const Materi = require("../models/Materi");
+const UserMateriProgress = require("../models/UserMateriProgress");
+const DiscussionRoom = require("../models/DiscussionRoom");
+const User = require("../models/User");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) =>
@@ -78,105 +82,107 @@ exports.getLastUpload = async (req, res) => {
   }
 };
 
-// BARU: Check rooms completion & random picker
 exports.checkRoomsCompletion = async (req, res) => {
   try {
     const { materiId, userId } = req.params;
     
-    // 1. Ambil SEMUA rooms untuk materi ini
+    // 1. Ambil SEMUA rooms materi ini
     const allRooms = await DiscussionRoom.findAll({
-      where: { materiId },
+      where: { materiId: parseInt(materiId) },
       attributes: ['id', 'title']
     });
     
     if (allRooms.length === 0) {
-      return res.json({ 
-        allCompleted: false, 
-        randomPresenter: null,
-        totalRooms: 0 
-      });
+      return res.json({ allCompleted: false, randomPresenter: null });
     }
     
-    // 2. Cek submission user
+    // 2. Cek user sudah submit?
     const userSubmission = await Submission.findOne({
-      where: { userId, materiId }
+      where: { userId: parseInt(userId), materiId: parseInt(materiId) }
     });
     const userCompleted = !!userSubmission;
     
-    // 3. Cek SEMUA rooms sudah submit?
+    // 3. Cek tiap room sudah ada submission?
     let allRoomsSubmitted = true;
-    const submittedRooms = [];
+    const roomStatuses = [];
     
     for (const room of allRooms) {
-      const roomSubmission = await Submission.findOne({
+      // Ambil members room ini
+      const roomMembers = await UserMateriProgress.findAll({
         where: { 
-          materiId, 
-          roomId: room.id 
+          roomId: room.id, 
+          materiId: parseInt(materiId) 
+        },
+        attributes: ['userId']
+      });
+      
+      const memberUserIds = roomMembers.map(m => m.userId);
+      
+      // Cek ada submission dari member room ini?
+      const roomSubmissionCount = await Submission.count({
+        where: { 
+          materiId: parseInt(materiId),
+          userId: { [Op.in]: memberUserIds }
         }
       });
       
-      if (roomSubmission) {
-        submittedRooms.push({
-          roomId: room.id,
-          roomName: room.title,
-          submitted: true
-        });
-      } else {
-        allRoomsSubmitted = false;
-        submittedRooms.push({
-          roomId: room.id,
-          roomName: room.title,
-          submitted: false
-        });
-      }
-    }
-    
-    let randomPresenter = null;
-    
-    // 4. KALAU SEMUA ROOM UDAH SUBMIT → Random picker
-    if (allRoomsSubmitted) {
-      const roomSubmissions = await Submission.findAll({
-        where: { materiId },
-        include: [{
-          model: User, 
-          as: "User",
-          attributes: ['id', 'name']
-        }, {
-          model: DiscussionRoom,
-          attributes: ['title']
-        }],
-        order: [['score', 'DESC'], ['createdAt', 'DESC']]
+      const roomSubmitted = roomSubmissionCount > 0;
+      roomStatuses.push({
+        roomId: room.id,
+        roomName: room.title,
+        submitted: roomSubmitted,
+        memberCount: memberUserIds.length
       });
       
-      if (roomSubmissions.length > 0) {
-        const randomIndex = Math.floor(Math.random() * roomSubmissions.length);
-        const selected = roomSubmissions[randomIndex];
+      if (!roomSubmitted) allRoomsSubmitted = false;
+    }
+    
+    // 4. Random presenter (semua room selesai)
+    let randomPresenter = null;
+    if (allRoomsSubmitted) {
+      // Ambil submissions terbaik
+      const topSubmissions = await Submission.findAll({
+        where: { materiId: parseInt(materiId) },
+        include: [{
+          model: User,
+          attributes: ['id', 'name']
+        }],
+        order: [['score', 'DESC'], ['createdAt', 'DESC']],
+        limit: 20
+      });
+      
+      if (topSubmissions.length > 0) {
+        const randomIndex = Math.floor(Math.random() * topSubmissions.length);
+        const selected = topSubmissions[randomIndex];
+        
+        // Cari room name berdasarkan user
+        const userRoom = await UserMateriProgress.findOne({
+          where: { userId: selected.userId, materiId: parseInt(materiId) }
+        });
+        
+        const room = userRoom ? 
+          await DiscussionRoom.findByPk(userRoom.roomId, { attributes: ['title'] }) : 
+          null;
         
         randomPresenter = {
           name: selected.User?.name || `User ${selected.userId}`,
-          roomName: selected.DiscussionRoom?.title || `Room ${selected.roomId}`,
+          roomName: room?.title || `Room ${selected.id?.toString().slice(-3)}`,
           score: selected.score || 0,
-          roomId: selected.roomId
+          userId: selected.userId
         };
       }
     }
     
-    res.json({ 
+    res.json({
       allCompleted: allRoomsSubmitted,
       userCompleted,
       randomPresenter,
       totalRooms: allRooms.length,
-      submittedRoomsCount: submittedRooms.length,
-      roomsStatus: submittedRooms
+      roomStatuses
     });
-
+    
   } catch (err) {
-    console.error("ROOMS COMPLETION ERROR:", err);
-    res.json({ 
-      allCompleted: false, 
-      userCompleted: false,
-      randomPresenter: null,
-      totalRooms: 0 
-    });
+    console.error("ROOMS ERROR:", err);
+    res.json({ allCompleted: false, randomPresenter: null });
   }
 };

@@ -28,7 +28,5 @@ const Submission = sequelize.define("Submission", {
 Submission.belongsTo(User, { foreignKey: "userId" });
 Submission.belongsTo(Materi, { foreignKey: "materiId" });
 Submission.belongsTo(Badge, { foreignKey: "badge_id"}); 
-Submission.belongsTo(DiscussionRoom, { foreignKey: "roomId" });
-DiscussionRoom.hasMany(Submission, { foreignKey: "roomId" });
 
 module.exports = Submission;
