@@ -83,65 +83,100 @@ exports.checkRoomsCompletion = async (req, res) => {
   try {
     const { materiId, userId } = req.params;
     
-    // Ambil materi
-    const materi = await Materi.findByPk(materiId);
-    
-    if (!materi) {
-      return res.json({ allCompleted: false, randomPresenter: null });
-    }
-
-    // Cek submissions user untuk materi ini
-    const userSubmissions = await Submission.findAll({
-      where: { userId, materiId },
-      include: [{ model: User, as: "User" }]
+    // 1. Ambil SEMUA rooms untuk materi ini
+    const allRooms = await DiscussionRoom.findAll({
+      where: { materiId },
+      attributes: ['id', 'title']
     });
-
-    // Jika ada submission, berarti sudah selesai untuk materi ini
-    const allCompleted = userSubmissions.length > 0;
-
+    
+    if (allRooms.length === 0) {
+      return res.json({ 
+        allCompleted: false, 
+        randomPresenter: null,
+        totalRooms: 0 
+      });
+    }
+    
+    // 2. Cek submission user
+    const userSubmission = await Submission.findOne({
+      where: { userId, materiId }
+    });
+    const userCompleted = !!userSubmission;
+    
+    // 3. Cek SEMUA rooms sudah submit?
+    let allRoomsSubmitted = true;
+    const submittedRooms = [];
+    
+    for (const room of allRooms) {
+      const roomSubmission = await Submission.findOne({
+        where: { 
+          materiId, 
+          roomId: room.id 
+        }
+      });
+      
+      if (roomSubmission) {
+        submittedRooms.push({
+          roomId: room.id,
+          roomName: room.title,
+          submitted: true
+        });
+      } else {
+        allRoomsSubmitted = false;
+        submittedRooms.push({
+          roomId: room.id,
+          roomName: room.title,
+          submitted: false
+        });
+      }
+    }
+    
     let randomPresenter = null;
     
-    if (allCompleted) {
-      // Random picker: ambil top submissions untuk materi ini
-      const topSubmissions = await Submission.findAll({
+    // 4. KALAU SEMUA ROOM UDAH SUBMIT → Random picker
+    if (allRoomsSubmitted) {
+      const roomSubmissions = await Submission.findAll({
         where: { materiId },
-        include: [
-          { model: User, as: "User" }
-        ],
-        order: [
-          ['score', 'DESC'], 
-          ['createdAt', 'DESC']
-        ],
-        limit: 20 // Ambil 20 teratas untuk random pick
+        include: [{
+          model: User, 
+          as: "User",
+          attributes: ['id', 'name']
+        }, {
+          model: DiscussionRoom,
+          attributes: ['title']
+        }],
+        order: [['score', 'DESC'], ['createdAt', 'DESC']]
       });
-
-      if (topSubmissions.length > 0) {
-        // Pilih random dari top 20
-        const randomIndex = Math.floor(Math.random() * topSubmissions.length);
-        const selected = topSubmissions[randomIndex];
+      
+      if (roomSubmissions.length > 0) {
+        const randomIndex = Math.floor(Math.random() * roomSubmissions.length);
+        const selected = roomSubmissions[randomIndex];
         
         randomPresenter = {
           name: selected.User?.name || `User ${selected.userId}`,
-          roomName: selected.roomName || `Room ${selected.id.slice(-4)}`,
+          roomName: selected.DiscussionRoom?.title || `Room ${selected.roomId}`,
           score: selected.score || 0,
-          userId: selected.userId
+          roomId: selected.roomId
         };
       }
     }
-
+    
     res.json({ 
-      allCompleted, 
+      allCompleted: allRoomsSubmitted,
+      userCompleted,
       randomPresenter,
-      totalSubmissions: userSubmissions.length,
-      userSubmissions: userSubmissions.map(s => ({
-        id: s.id,
-        score: s.score,
-        createdAt: s.createdAt
-      }))
+      totalRooms: allRooms.length,
+      submittedRoomsCount: submittedRooms.length,
+      roomsStatus: submittedRooms
     });
 
   } catch (err) {
     console.error("ROOMS COMPLETION ERROR:", err);
-    res.status(500).json({ allCompleted: false, randomPresenter: null });
+    res.json({ 
+      allCompleted: false, 
+      userCompleted: false,
+      randomPresenter: null,
+      totalRooms: 0 
+    });
   }
 };

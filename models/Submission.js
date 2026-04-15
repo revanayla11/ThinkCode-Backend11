@@ -3,6 +3,7 @@ const sequelize = require("../config/db");
 const User = require("./User");
 const Materi = require("./Materi");
 const Badge = require("./Badge"); 
+const DiscussionRoom = require("./DiscussionRoom"); 
 
 const Submission = sequelize.define("Submission", {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -14,10 +15,20 @@ const Submission = sequelize.define("Submission", {
   score: { type: DataTypes.FLOAT, defaultValue: 0 },
   feedback: { type: DataTypes.TEXT },
   badge_id: { type: DataTypes.INTEGER }, 
+  roomId: { 
+  type: DataTypes.INTEGER,
+  allowNull: true, 
+  references: {
+    model: 'discussion_rooms',
+    key: 'id'
+  }
+},
 }, { tableName: "submissions", timestamps: true });
 
 Submission.belongsTo(User, { foreignKey: "userId" });
 Submission.belongsTo(Materi, { foreignKey: "materiId" });
 Submission.belongsTo(Badge, { foreignKey: "badge_id"}); 
+Submission.belongsTo(DiscussionRoom, { foreignKey: "roomId" });
+DiscussionRoom.hasMany(Submission, { foreignKey: "roomId" });
 
 module.exports = Submission;
