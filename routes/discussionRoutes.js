@@ -46,6 +46,5 @@ router.get('/room/:roomId/workspace-attempts', auth, verifyToken, discussionCont
 
 // routes/discussion.js
 router.post('/room/:roomId/submit', verifyToken, discussionController.markRoomSubmitted);
-// Tambah di routes
-app.get('/api/discussion/:roomId/penalty-status', verifyToken, discussionController.checkAttemptPenalty);
+
 module.exports = router;
