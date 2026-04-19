@@ -1108,46 +1108,61 @@ exports.validateWorkspace = async (req, res) => {
     const materiId = room.materiId;
     const expected = getExpectedAnswerByMateri(materiId);
     
-    // 🔥 PSEUDOCODE (sama)
+    // 🔥 PSEUDOCODE (OK)
     const userPseudoNorm = normalizePseudocode(workspace.pseudocode);
     const expectedPseudoNorm = normalizePseudocode(expected.pseudocode);
     const pseudoSimilarity = calculateSimilarity(userPseudoNorm, expectedPseudoNorm) * 100;
     
-    // 🔥 🔥 FLOWCHART - FORCE PARSE!
+    // 🔥 🔥 FIXED FLOWCHART - ULTRA ROBUST!
     let flowchartScore = 0;
     let userConditions = [];
     
-    if (workspace.flowchart) {
-      try {
-        // 🔥 PARSE APA PUN FORMATNYA
-        let flowchartData;
-        if (typeof workspace.flowchart === 'string') {
-          flowchartData = JSON.parse(workspace.flowchart);
-        } else if (typeof workspace.flowchart === 'object') {
-          flowchartData = workspace.flowchart;
-        } else {
-          throw new Error('Invalid flowchart format');
-        }
-        
-        userConditions = Array.isArray(flowchartData.conditions) 
-          ? flowchartData.conditions.filter(c => c.condition?.trim())
-          : [];
-          
-        console.log('🔄 FLOWCHART PARSED:', {
-          rawType: typeof workspace.flowchart,
-          rawPreview: JSON.stringify(workspace.flowchart).substring(0, 100),
-          conditions: userConditions.length,
-          firstCond: userConditions[0]?.condition
-        });
-        
-      } catch (parseError) {
-        console.error('💥 FLOWCHART PARSE ERROR:', parseError.message);
+    console.log('🔍 FLOWCHART RAW:', {
+      type: typeof workspace.flowchart,
+      raw: workspace.flowchart,
+      preview: JSON.stringify(workspace.flowchart)?.substring(0, 100)
+    });
+    
+    try {
+      let flowchartData;
+      
+      // 🔥 CASE 1: JSON STRING (DB default)
+      if (typeof workspace.flowchart === 'string') {
+        flowchartData = JSON.parse(workspace.flowchart);
       }
+      // 🔥 CASE 2: JSON OBJECT (direct save)
+      else if (workspace.flowchart && typeof workspace.flowchart === 'object') {
+        flowchartData = workspace.flowchart;
+      }
+      // 🔥 CASE 3: NULL/EMPTY
+      else {
+        flowchartData = { conditions: [] };
+      }
+      
+      // 🔥 FORCE VALIDATE ARRAY
+      userConditions = Array.isArray(flowchartData?.conditions) 
+        ? flowchartData.conditions.filter(c => c?.condition?.trim().length > 0)
+        : [];
+        
+      console.log('✅ FLOWCHART PARSED:', {
+        conditionsFound: userConditions.length,
+        firstCond: userConditions[0]?.condition || 'NONE',
+        rawConditions: flowchartData?.conditions?.length || 0
+      });
+      
+    } catch (parseError) {
+      console.error('💥 FLOWCHART PARSE ERROR:', parseError.message);
+      userConditions = []; // Fallback
     }
     
     // 🔥 VALIDATE CONDITIONS
     const expectedConditions = expected.flowchart.conditions || [];
     let conditionMatches = 0;
+    
+    console.log('🔍 CONDITIONS COMPARE:', {
+      userConditions: userConditions.length,
+      expectedConditions: expectedConditions.length
+    });
     
     userConditions.forEach((userCond, i) => {
       if (i < expectedConditions.length) {
@@ -1161,16 +1176,19 @@ exports.validateWorkspace = async (req, res) => {
           similarity: condSim.toFixed(2)
         });
         
-        if (condSim > 0.6) {  // Lower threshold
+        if (condSim > 0.6) {
           conditionMatches++;
         }
       }
     });
     
-    flowchartScore = userConditions.length > 0 
-      ? (conditionMatches / Math.min(userConditions.length, expectedConditions.length)) * 100
-      : 0;
-
+    // 🔥 CALCULATE FINAL FLOWCHART SCORE
+    if (userConditions.length > 0 && expectedConditions.length > 0) {
+      flowchartScore = (conditionMatches / Math.min(userConditions.length, expectedConditions.length)) * 100;
+    } else if (userConditions.length === 0 && expectedConditions.length === 0) {
+      flowchartScore = 100; // No conditions needed
+    }
+    
     const finalScore = Math.round((pseudoSimilarity * 0.6 + flowchartScore * 0.4));
     const isValid = finalScore >= 80;
     
@@ -1187,16 +1205,18 @@ exports.validateWorkspace = async (req, res) => {
       valid: isValid,
       score: finalScore,
       details: {
-    // 🔥 UI FRIENDLY FORMAT
-    pseudocode: `${pseudoSimilarity.toFixed(1)}%`,
-    flowchart: `${flowchartScore.toFixed(1)}%`,
-    
-    // 🔥 DEBUG INFO (opsional, bisa dihapus)
-    pseudocodeRaw: pseudoSimilarity.toFixed(1),
-    flowchartRaw: flowchartScore.toFixed(1),
-    conditions: userConditions.length,
-    matches: conditionMatches
-  }
+        // 🔥 UI FRIENDLY - SELALU STRING!
+        pseudocode: `${Math.round(pseudoSimilarity)}%`,
+        flowchart: `${Math.round(flowchartScore)}%`,
+        
+        // Debug info
+        pseudocodeRaw: pseudoSimilarity.toFixed(1),
+        flowchartRaw: flowchartScore.toFixed(1),
+        conditions: userConditions.length,
+        matches: conditionMatches,
+        userConditions: userConditions.map(c => normalizeCondition(c.condition)),
+        expectedConditions: expectedConditions.map(c => normalizeCondition(c.condition))
+      }
     });
 
   } catch (error) {
