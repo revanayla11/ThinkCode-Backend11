@@ -1,3 +1,4 @@
+const sequelize = require("../../config/db"); // Sesuaikan path config DB
 const User = require("../../models/User");
 const bcrypt = require("bcryptjs");
 const { Op } = require("sequelize");
@@ -77,11 +78,56 @@ exports.resetPassword = async (req,res)=>{
   }catch(err){ console.error(err); res.status(500).json({ status:false, message:"Server error" }); }
 };
 
-exports.remove = async (req,res)=>{
-  try{
-    await User.destroy({ where:{id:req.params.id} });
-    res.json({ status:true, message:"User dihapus" });
-  }catch(err){ console.error(err); res.status(500).json({ status:false, message:"Server error" }); }
+exports.remove = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Import sequelize dulu!
+  try {
+    const userId = req.params.id;
+    
+    console.log(`🔄 Menghapus user ID: ${userId}`);
+    
+    // 1. HAPUS ROOM MEMBER dulu (relasi utama)
+    const deletedMembers = await RoomMember.destroy({
+      where: { user_id: userId },
+      transaction
+    });
+    console.log(`✅ Dihapus ${deletedMembers} RoomMember`);
+
+    // 2. HAPUS DISCUSSION ROOM yang dibuat user (jika teacher)
+    const deletedRooms = await DiscussionRoom.destroy({
+      where: { teacher_id: userId }, // sesuaikan nama kolom
+      transaction
+    });
+    console.log(`✅ Dihapus ${deletedRooms} DiscussionRoom`);
+
+    // 3. HAPUS USER
+    const deletedUser = await User.destroy({
+      where: { id: userId },
+      force: true, // Skip soft delete
+      transaction
+    });
+    
+    console.log(`✅ User ${userId} dihapus: ${!!deletedUser}`);
+
+    await transaction.commit();
+    
+    res.json({ 
+      status: true, 
+      message: "User dihapus berhasil",
+      deleted: { user: deletedUser, members: deletedMembers, rooms: deletedRooms }
+    });
+    
+  } catch (err) {
+    await transaction.rollback();
+    console.error("❌ DELETE ERROR:", err.message);
+    console.error("❌ FULL ERROR:", err);
+    
+    res.status(500).json({ 
+      status: false, 
+      message: err.message.includes('FOREIGN KEY') 
+        ? "Gagal hapus: User masih terdaftar di room/kelas"
+        : "Server error" 
+    });
+  }
 };
 
 exports.getStudentRooms = async (req, res) => {
