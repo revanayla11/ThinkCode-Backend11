@@ -1108,50 +1108,138 @@ exports.validateWorkspace = async (req, res) => {
     const materiId = room.materiId;
     const expected = getExpectedAnswerByMateri(materiId);
     
-    // 🔥 PSEUDOCODE VALIDATION
+    console.log(`🎯 MATERI ${materiId} EXPECTED:`, {
+      pseudoLength: expected.pseudocode.length,
+      flowConditions: expected.flowchart.conditions.length,
+      hasElse: expected.flowchart.showElse
+    });
+    
+    /* ================= PSEUDOCODE VALIDATION ================= */
     const userPseudoNorm = normalizePseudocode(workspace.pseudocode);
     const expectedPseudoNorm = normalizePseudocode(expected.pseudocode);
     const pseudoSimilarity = calculateSimilarity(userPseudoNorm, expectedPseudoNorm) * 100;
     
-    // 🔥 FLOWCHART VALIDATION
+    console.log('📝 PSEUDOCODE:', {
+      userLength: userPseudoNorm.length,
+      expectedLength: expectedPseudoNorm.length,
+      similarity: pseudoSimilarity.toFixed(1) + '%',
+      exactMatch: userPseudoNorm === expectedPseudoNorm
+    });
+    
+    /* ================= FLOWCHART VALIDATION - FIXED! ================= */
     let flowchartScore = 0;
+    let flowchartDetails = {
+      userConditions: 0,
+      expectedConditions: 0,
+      matches: 0,
+      hasElse: false,
+      elseMatch: false
+    };
+    
     if (workspace.flowchart && Array.isArray(workspace.flowchart.conditions)) {
-      const userConditions = workspace.flowchart.conditions;
+      const userConditions = workspace.flowchart.conditions.filter(c => c.condition?.trim());
       const expectedConditions = expected.flowchart.conditions || [];
       
-      let conditionMatches = 0;
-      userConditions.forEach((userCond, i) => {
-        if (i < expectedConditions.length) {
-          const condSim = calculateSimilarity(
-            normalizeCondition(userCond.condition), 
-            normalizeCondition(expectedConditions[i].condition)
-          );
-          if (condSim > 0.7) conditionMatches++;
-        }
+      flowchartDetails.userConditions = userConditions.length;
+      flowchartDetails.expectedConditions = expectedConditions.length;
+      
+      console.log('🔄 FLOWCHART RAW:', {
+        userConditions: userConditions.map(c => ({ cond: c.condition, yes: c.yes?.substring(0,30) })),
+        expectedConditions: expectedConditions.map(c => ({ cond: c.condition, yes: c.yes?.substring(0,30) }))
       });
       
-      flowchartScore = (conditionMatches / Math.max(userConditions.length, expectedConditions.length)) * 100;
+      let conditionMatches = 0;
+      let totalEvaluated = Math.min(userConditions.length, expectedConditions.length);
+      
+      // 🔥 COMPARE EACH CONDITION PAIR
+      for (let i = 0; i < totalEvaluated; i++) {
+        const userCond = normalizeCondition(userConditions[i].condition);
+        const expCond = normalizeCondition(expectedConditions[i].condition);
+        const userYes = normalizeInstruction(userConditions[i].yes || '');
+        const expYes = normalizeInstruction(expectedConditions[i].yes || '');
+        
+        const condSim = calculateSimilarity(userCond, expCond);
+        const yesSim = calculateSimilarity(userYes, expYes);
+        
+        const isCondMatch = condSim > 0.6; // 🔥 LOWERED FROM 0.7
+        const isYesMatch = yesSim > 0.5;
+        
+        console.log(`⚡ COND ${i}:`, {
+          userCond,
+          expCond,
+          condSim: condSim.toFixed(2),
+          userYes: userYes.substring(0,20),
+          expYes: expYes.substring(0,20),
+          yesSim: yesSim.toFixed(2),
+          match: (isCondMatch || isYesMatch) ? '✅' : '❌'
+        });
+        
+        if (isCondMatch || isYesMatch) {
+          conditionMatches++;
+        }
+      }
+      
+      // 🔥 BASE SCORE
+      flowchartScore = totalEvaluated > 0 
+        ? (conditionMatches / totalEvaluated) * 70  // 70% dari kondisi
+        : 0;
+      
+      // 🔥 ELSE BONUS (20%)
+      const expectedHasElse = expected.flowchart.showElse;
+      const userHasElse = workspace.flowchart.showElse;
+      flowchartDetails.hasElse = userHasElse;
+      
+      if (expectedHasElse && userHasElse) {
+        const elseSim = workspace.flowchart.elseInstruction 
+          ? calculateSimilarity(
+              normalizeInstruction(workspace.flowchart.elseInstruction),
+              normalizeInstruction(expected.flowchart.elseInstruction)
+            )
+          : 0;
+        
+        flowchartDetails.elseMatch = elseSim > 0.5;
+        if (flowchartDetails.elseMatch) {
+          flowchartScore += 20;
+        } else {
+          flowchartScore += 10; // Partial credit
+        }
+      } else if (!expectedHasElse && !userHasElse) {
+        flowchartScore += 10; // Bonus no-else correct
+      }
+      
+      flowchartScore = Math.min(100, flowchartScore);
+      flowchartDetails.matches = conditionMatches;
     }
-
+    
+    /* ================= FINAL SCORE ================= */
     const finalScore = Math.round((pseudoSimilarity * 0.6 + flowchartScore * 0.4));
     const isValid = finalScore >= 80;
-
-    console.log(`✅ VALIDATION RESULT:`, {
+    
+    console.log(`🎯 FINAL RESULT:`, {
       pseudoSimilarity: pseudoSimilarity.toFixed(1),
       flowchartScore: flowchartScore.toFixed(1),
       finalScore,
-      isValid
+      isValid,
+      flowchartDetails
     });
 
     res.json({
       valid: isValid,
       score: finalScore,
       details: {
-        pseudocodeSimilarity: pseudoSimilarity.toFixed(1),
-        flowchartScore: flowchartScore.toFixed(1),
-        pseudocodeMatch: userPseudoNorm === expectedPseudoNorm,
-        hasFlowchart: !!workspace.flowchart,
-        conditionsCount: workspace.flowchart?.conditions?.length || 0
+        pseudocode: {
+          similarity: pseudoSimilarity.toFixed(1),
+          match: userPseudoNorm === expectedPseudoNorm,
+          length: workspace.pseudocode?.length || 0
+        },
+        flowchart: {
+          ...flowchartDetails,
+          score: flowchartScore.toFixed(1)
+        },
+        breakdown: {
+          pseudocodeWeight: (pseudoSimilarity * 0.6).toFixed(0),
+          flowchartWeight: (flowchartScore * 0.4).toFixed(0)
+        }
       }
     });
 
@@ -1160,11 +1248,10 @@ exports.validateWorkspace = async (req, res) => {
     res.status(500).json({ 
       valid: false, 
       score: 0, 
-      error: "Validation timeout - coba lagi" 
+      error: "Validation error - coba lagi" 
     });
   }
 };
-
 /* ================= TASK FUNCTIONS ================= */
 exports.updateTask = async (req, res) => {
   try {
@@ -1638,6 +1725,31 @@ exports.checkAttemptPenalty = async (req, res) => {
   } catch (error) {
     console.error('checkAttemptPenalty error:', error);
     res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// 🔥 DEBUG FLOWCHART - TAMBAH DI AKHIR
+exports.debugFlowchart = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const [room, workspace] = await Promise.all([
+      DiscussionRoom.findByPk(parseInt(roomId)),
+      Workspace.findOne({ where: { roomId: parseInt(roomId) } })
+    ]);
+    
+    const materiId = room.materiId;
+    const expected = getExpectedAnswerByMateri(materiId);
+    
+    res.json({
+      success: true,
+      flowchart: workspace?.flowchart,
+      expectedFlowchart: expected.flowchart,
+      conditionsCount: workspace?.flowchart?.conditions?.length || 0,
+      normalizedUser: workspace?.flowchart?.conditions?.map(c => normalizeCondition(c.condition)),
+      normalizedExpected: expected.flowchart.conditions.map(c => normalizeCondition(c.condition))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
