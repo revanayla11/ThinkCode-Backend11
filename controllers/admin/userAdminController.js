@@ -84,32 +84,36 @@ exports.remove = async (req, res) => {
     
     console.log(`🔄 Teacher hapus student ID: ${userId}`);
     
-    // 1. Hapus student dari semua ROOM
+    // 1. HAPUS SUBMISSIONS
+    const deletedSubs = await sequelize.query(
+      `DELETE FROM submissions WHERE userId = ?`,
+      { replacements: [userId], type: sequelize.QueryTypes.DELETE }
+    );
+    console.log(`✅ Dihapus ${deletedSubs[1]} submissions`);
+
+    // 2. HAPUS ROOM MEMBERSHIP  
     const deletedMembers = await RoomMember.destroy({
       where: { user_id: userId }
     });
     console.log(`✅ Dihapus ${deletedMembers} room membership`);
 
-    // 2. Hapus STUDENT account
+    // 3. HAPUS USER
     const deletedUser = await User.destroy({
       where: { id: userId },
       force: true
     });
     
-    console.log(`✅ Student ${userId} dihapus: ${!!deletedUser}`);
+    console.log(`✅ Student ${userId} DIHAPUS ✅`);
 
     res.json({ 
       status: true, 
-      message: `Student dihapus (${deletedMembers} room membership)`, 
+      message: `Student dihapus (${deletedSubs[1]} submissions, ${deletedMembers} rooms)`, 
       deleted: deletedUser 
     });
     
   } catch (err) {
     console.error("❌ ERROR:", err.message);
-    res.status(500).json({ 
-      status: false, 
-      message: "Gagal hapus student" 
-    });
+    res.status(500).json({ status: false, message: err.message });
   }
 };
 
