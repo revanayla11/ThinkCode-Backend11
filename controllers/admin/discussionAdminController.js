@@ -112,7 +112,7 @@ exports.roomDetail = async (req, res) => {
        LEFT JOIN users u ON u.id = dm.userId
        WHERE dm.roomId = ?
        ORDER BY dm.createdAt ASC
-       LIMIT 50`,  // Reduced limit
+       LIMIT 50`,
       { replacements: [roomId], type: sequelize.QueryTypes.SELECT }
     );
 
@@ -120,7 +120,7 @@ exports.roomDetail = async (req, res) => {
     const usedClues = await DiscussionClueLog.count({ where: { roomId } });
     const maxClues = 3;
 
-    // 4. MateriAnswer - FIX INDEPENDENT CALL (NO 'this')
+    // 🔥 4. MATERIANSWER - FULLY PARSED!
     let materiAnswer = null;
     try {
       const roomMateri = await sequelize.query(
@@ -130,15 +130,93 @@ exports.roomDetail = async (req, res) => {
       
       if (roomMateri.length > 0) {
         const materiId = roomMateri[0].materi_id;
-        materiAnswer = await MateriAnswer.findOne({ where: { materiId } });
-        console.log(`📚 MateriAnswer for ${materiId}:`, materiAnswer ? 'Found' : 'Not found');
+        const rawAnswer = await MateriAnswer.findOne({ where: { materiId } });
+        
+        if (rawAnswer) {
+          // 🔥 PARSE PSEUDOCODE (kalau perlu)
+          let parsedPseudocode = rawAnswer.pseudocode;
+          
+          // 🔥 PARSE FLOWCHART - CRITICAL!
+          let parsedFlowchart = null;
+          try {
+            const flowchartStr = rawAnswer.flowchart;
+            if (flowchartStr && typeof flowchartStr === 'string') {
+              parsedFlowchart = JSON.parse(flowchartStr);
+              console.log(`✅ KUNCI JAWABAN ${materiId} PARSED:`, {
+                pseudocodeLen: parsedPseudocode?.length || 0,
+                flowchartConditions: parsedFlowchart?.conditions?.length || 0
+              });
+            } else if (flowchartStr && typeof flowchartStr === 'object') {
+              parsedFlowchart = flowchartStr;
+            }
+          } catch (parseErr) {
+            console.error(`❌ KUNCI JAWABAN flowchart parse failed:`, parseErr.message);
+            parsedFlowchart = null;
+          }
+          
+          materiAnswer = {
+            ...rawAnswer.toJSON(),
+            pseudocode: parsedPseudocode,
+            flowchart: parsedFlowchart  // 🔥 OBJECT SIAP RENDER!
+          };
+        } else {
+          console.log(`📚 MateriAnswer ${materiId}: Not found`);
+        }
       }
     } catch (answerErr) {
-      console.error('❌ MateriAnswer error:', answerErr);
-      materiAnswer = null;
+      console.error('❌ MateriAnswer full error:', answerErr.message);
     }
 
-    console.log(`✅ RoomDetail complete: room=${room.id}, messages=${messages.length}, clues=${usedClues}/${maxClues}`);
+    // 🔥 5. WORKSPACE LATEST (Siswa)
+    let latestWorkspace = null;
+    try {
+      const workspace = await Workspace.findOne({
+        where: { roomId },
+        order: [['updatedAt', 'DESC']]
+      });
+      
+      if (workspace) {
+        let parsedFlowchart = null;
+        try {
+          if (workspace.flowchart && typeof workspace.flowchart === 'string') {
+            parsedFlowchart = JSON.parse(workspace.flowchart);
+          } else if (workspace.flowchart) {
+            parsedFlowchart = workspace.flowchart;
+          }
+        } catch (e) {
+          console.error('❌ Workspace flowchart parse failed:', e.message);
+        }
+        
+        latestWorkspace = {
+          ...workspace.toJSON(),
+          flowchart: parsedFlowchart
+        };
+      }
+    } catch (wsErr) {
+      console.error('❌ Workspace error:', wsErr.message);
+    }
+
+    // 🔥 6. ATTEMPTS SUMMARY
+    const attemptsSummary = await sequelize.query(
+      `SELECT 
+        SUM(CASE WHEN type = 'pseudocode' THEN 1 ELSE 0 END) as pseudo_count,
+        SUM(CASE WHEN type = 'flowchart' THEN 1 ELSE 0 END) as flowchart_count,
+        COUNT(*) as total
+       FROM workspace_attempt 
+       WHERE roomId = ?`,
+      { replacements: [roomId], type: sequelize.QueryTypes.SELECT }
+    );
+    
+    const attempts = attemptsSummary[0] || { pseudo_count: 0, flowchart_count: 0, total: 0 };
+
+    console.log(`✅ RoomDetail COMPLETE:`, {
+      room: room.id,
+      messages: messages.length,
+      clues: `${usedClues}/${maxClues}`,
+      materiAnswer: materiAnswer ? '✅ Parsed' : '❌ Missing',
+      workspace: latestWorkspace ? '✅ Parsed' : '❌ None',
+      attempts: `${attempts.total} total`
+    });
 
     return res.json({
       status: true,
@@ -146,16 +224,22 @@ exports.roomDetail = async (req, res) => {
         room,
         messages,
         clue: { used: usedClues, max: maxClues },
-        materiAnswer: materiAnswer || null  // ✅ SAFE null
+        materiAnswer,        // 🔥 FULLY PARSED!
+        latestWorkspace,     // 🔥 Siswa latest - PARSED!
+        attempts            // 🔥 Summary
       }
     });
 
   } catch (err) {
-    console.error(`💥 roomDetail CRASH roomId=${req.params.roomId}:`, err);
+    console.error(`💥 roomDetail TOTAL CRASH roomId=${req.params.roomId}:`, {
+      message: err.message,
+      stack: err.stack,
+      sql: err.sql
+    });
     return res.status(500).json({ 
       status: false, 
-      message: "Server error", 
-      error: err.message 
+      message: "Server error",
+      debug: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 };
