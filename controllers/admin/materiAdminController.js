@@ -94,9 +94,7 @@ exports.uploadOrientasi = async (req, res) => {
 
   try {
     // Generate full URL
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://powderblue-squirrel-795269.hostingersite.com'
-      : 'http://localhost:5000';
+    const baseUrl = 'https://powderblue-squirrel-795269.hostingersite.com';
     const url = `${baseUrl}/uploads/orientasi/${req.file.filename}`;
     
     console.log("Generated URL:", url);
@@ -177,9 +175,7 @@ exports.uploadSectionImage = async (req, res) => {
   }
 
   try {
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://powderblue-squirrel-795269.hostingersite.com'
-      : 'http://localhost:5000';
+    const baseUrl = 'https://powderblue-squirrel-795269.hostingersite.com';
     const url = `${baseUrl}/uploads/sections/${req.file.filename}`;
     
     // Buat folder sections jika belum ada
