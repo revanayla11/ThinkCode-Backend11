@@ -95,7 +95,7 @@ exports.uploadOrientasi = async (req, res) => {
   try {
     // Generate full URL
     const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://thinkcode-backend11-production.up.railway.app'
+      ? 'https://powderblue-squirrel-795269.hostingersite.com'
       : 'http://localhost:5000';
     const url = `${baseUrl}/uploads/orientasi/${req.file.filename}`;
     
@@ -178,7 +178,7 @@ exports.uploadSectionImage = async (req, res) => {
 
   try {
     const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://thinkcode-backend11-production.up.railway.app'
+      ? 'https://powderblue-squirrel-795269.hostingersite.com'
       : 'http://localhost:5000';
     const url = `${baseUrl}/uploads/sections/${req.file.filename}`;
     
