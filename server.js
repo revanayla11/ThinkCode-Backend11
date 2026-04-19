@@ -83,7 +83,7 @@ app.get("/health", (req, res) => {
 // ====== SAFE SYNC FUNCTION ======
 const safeSync = async () => {
   try {
-    if (process.env.AUTO_SYNC !== 'false') {
+    if (process.env.AUTO_SYNC !== 'true') {
       console.log("ℹ️  Sync disabled");
       return true;
     }
