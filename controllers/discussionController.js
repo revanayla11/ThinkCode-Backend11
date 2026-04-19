@@ -624,7 +624,7 @@ exports.saveFlowchart = async (req, res) => {
     const roomId = parseInt(req.params.roomId);
     const { flowchart } = req.body;
 
-    console.log('📥 FLOWCHART:', JSON.stringify(flowchart, null, 2));
+    console.log('📥 FLOWCHART RAW:', JSON.stringify(flowchart, null, 2));
 
     // 🔥 GET EXISTING WORKSPACE
     const existing = await Workspace.findOne({ where: { roomId }, transaction });
@@ -633,14 +633,15 @@ exports.saveFlowchart = async (req, res) => {
       return res.status(400).json({ error: 'Workspace not found' });
     }
 
-    // 🔥 CLEAN FLOWCHART
+    // 🔥 CLEAN FLOWCHART - FIXED!
     const cleanConditions = (flowchart.conditions || [])
       .map(c => ({
         condition: String(c.condition || '').trim(),
         yes: String(c.yes || '').trim(),
         no: String(c.no || '').trim()
       }))
-      .filter(c => c.condition);
+      // 🔥 FIXED: HANYA FILTER KONDISI 100% KOSONG
+      .filter(c => c.condition.length > 0);
 
     const cleanFlow = {
       conditions: cleanConditions,
@@ -648,28 +649,27 @@ exports.saveFlowchart = async (req, res) => {
       showElse: Boolean(flowchart.showElse)
     };
 
+    console.log('🔧 CLEANED FLOWCHART:', {
+      rawConditions: flowchart.conditions?.length || 0,
+      cleanConditions: cleanConditions.length,
+      firstCond: cleanConditions[0]?.condition || 'EMPTY'
+    });
+
     if (cleanFlow.conditions.length === 0) {
       await transaction.rollback();
-      return res.status(400).json({ error: 'No valid conditions' });
+      return res.status(400).json({ error: 'No valid conditions found' });
     }
 
-    // 🔥 UPDATE - KEEP PSEUDOCODE!
+    // 🔥 UPDATE WORKSPACE
     await Workspace.update({
       flowchart: cleanFlow,
       updatedAt: new Date()
-    }, { 
-      where: { roomId }, 
-      transaction
-    });
+    }, { where: { roomId }, transaction });
 
     // 🔥 TASK 4
-    await RoomTaskProgress.upsert({ 
-      roomId, 
-      taskId: 4, 
-      done: true 
-    }, { transaction });
+    await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
 
-    // 🔥 ATTEMPT - DULU!
+    // 🔥 ATTEMPT COUNT
     const attemptCount = await WorkspaceAttempt.count({ 
       where: { roomId, type: 'flowchart' }, 
       transaction 
@@ -682,14 +682,14 @@ exports.saveFlowchart = async (req, res) => {
       content: JSON.stringify(cleanFlow)
     }, { transaction });
 
-    // 🔥 🔥 FIXED: APPLY PENALTY SETELAH ATTEMPT DIBUAT
     const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
 
-    // 🔥 VERIFY SAVE
+    // 🔥 VERIFY SAVE - FIXED LOG
     const verify = await Workspace.findOne({ where: { roomId }, transaction });
     console.log('✅ DB AFTER SAVE:', {
       pseudocodeLength: verify.pseudocode?.length || 0,
-      flowchartConditions: verify.flowchart?.conditions?.length || 0
+      flowchartConditions: verify.flowchart?.conditions?.length || 0,
+      firstCondition: verify.flowchart?.conditions?.[0]?.condition || 'NONE'
     });
 
     await transaction.commit();
@@ -698,17 +698,16 @@ exports.saveFlowchart = async (req, res) => {
       status: true,
       message: `✅ Saved ${cleanFlow.conditions.length} conditions`,
       data: {
-        pseudocodeKept: !!existing.pseudocode,
         conditions: cleanFlow.conditions.length,
+        firstCondition: cleanFlow.conditions[0]?.condition,
         attempts: attemptCount + 1,
-        // 🔥 NEW PENALTY INFO
         penalty: penaltyResult
       }
     });
 
   } catch (error) {
     await transaction.rollback();
-    console.error('💥 ERROR:', error.message);
+    console.error('💥 saveFlowchart ERROR:', error);
     res.status(500).json({ error: error.message });
   }
 };
