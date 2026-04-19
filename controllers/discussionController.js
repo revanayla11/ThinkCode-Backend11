@@ -1202,22 +1202,26 @@ exports.validateWorkspace = async (req, res) => {
     });
 
     res.json({
-      valid: isValid,
-      score: finalScore,
-      
-      Pseudocode: `${Math.round(pseudoSimilarity)}%`,
-      Flowchart: `${Math.round(flowchartScore)}%`,
-      
-      // Legacy support
-      pseudocode: `${Math.round(pseudoSimilarity)}%`,
-      flowchart: `${Math.round(flowchartScore)}%`,
-      
-      // Details (buat debug)
-      details: {
-        pseudocode: `${Math.round(pseudoSimilarity)}%`,
-        flowchart: `${Math.round(flowchartScore)}%`
-      }
-    });
+  valid: isValid,
+  score: finalScore,
+  
+  // 🔥 FIX: TAMBAH details object YANG SESUAI FRONTEND
+  details: {
+    pseudocodeSimilarity: Math.round(pseudoSimilarity),
+    flowchartScore: Math.round(flowchartScore),
+    conditionsCount: userConditions.length,
+    pseudocodeMatch: pseudoSimilarity >= 80,
+    flowchartMatch: flowchartScore >= 80
+  },
+  
+  // Legacy support (tetap ada)
+  pseudocode: `${Math.round(pseudoSimilarity)}%`,
+  flowchart: `${Math.round(flowchartScore)}%`,
+  
+  // Backward compatibility
+  Pseudocode: `${Math.round(pseudoSimilarity)}%`,
+  Flowchart: `${Math.round(flowchartScore)}%`
+});
 
   } catch (error) {
     res.status(500).json({ 
