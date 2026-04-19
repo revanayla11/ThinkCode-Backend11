@@ -82,17 +82,29 @@ exports.remove = async (req, res) => {
   try {
     const userId = req.params.id;
     
-    // RAW SQL - bypass semua
-    await sequelize.query(`DELETE FROM submissions WHERE userId = ${userId}`);
-    await sequelize.query(`DELETE FROM room_members WHERE user_id = ${userId}`);
+    console.log(`🔄 Hapus student ${userId} - SEMUA RELASI`);
     
-    // Hapus user
+    // HAPUS SEMUA relasi RAW SQL
+    await sequelize.query('DELETE FROM user_material_progress WHERE userId = ?', { 
+      replacements: [userId], type: sequelize.QueryTypes.DELETE 
+    });
+    
+    await sequelize.query('DELETE FROM submissions WHERE userId = ?', { 
+      replacements: [userId], type: sequelize.QueryTypes.DELETE 
+    });
+    
+    await sequelize.query('DELETE FROM room_members WHERE user_id = ?', { 
+      replacements: [userId], type: sequelize.QueryTypes.DELETE 
+    });
+    
+    // HAPUS USER
     await User.destroy({ where: { id: userId }, force: true });
     
-    res.json({ status: true, message: "✅ Student dihapus" });
+    console.log(`✅ STUDENT ${userId} DIHAPUS TOTAL ✅`);
+    res.json({ status: true, message: "✅ Student dihapus permanen" });
     
   } catch (err) {
-    console.error(err);
+    console.error("❌ ERROR:", err.message);
     res.status(500).json({ status: false, message: err.message });
   }
 };
