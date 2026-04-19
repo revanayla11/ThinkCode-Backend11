@@ -24,6 +24,7 @@ const RoomTaskProgress = sequelize.define('RoomTaskProgress', {
     defaultValue: false,
   },
 }, {
+  tableName: "room_task_progress",
   timestamps: true,
   indexes: [
     {

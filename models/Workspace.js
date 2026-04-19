@@ -25,7 +25,7 @@ const Workspace = sequelize.define('Workspace', {
     allowNull: true,
   },
 }, {
-  timestamps: true,
+  tableName: "workspace", timestamps: true,
 });
 
 module.exports = Workspace;
