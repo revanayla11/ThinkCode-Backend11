@@ -97,7 +97,7 @@ const safeSync = async () => {
   
     
     // 3. FULL SYNC
-    await models.sequelize.sync({alter: true});
+    await models.sequelize.sync({force: true});
     console.log("✅ Tables recreated!");
     
     // 4. RE-ENABLE
