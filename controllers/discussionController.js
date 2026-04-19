@@ -1187,15 +1187,16 @@ exports.validateWorkspace = async (req, res) => {
       valid: isValid,
       score: finalScore,
       details: {
-        pseudocode: { similarity: pseudoSimilarity.toFixed(1) },
-        flowchart: { 
-          score: flowchartScore.toFixed(1),
-          conditions: userConditions.length,
-          matches: conditionMatches,
-          rawType: typeof workspace.flowchart,
-          rawPreview: JSON.stringify(workspace.flowchart).substring(0, 100)
-        }
-      }
+    // 🔥 UI FRIENDLY FORMAT
+    pseudocode: `${pseudoSimilarity.toFixed(1)}%`,
+    flowchart: `${flowchartScore.toFixed(1)}%`,
+    
+    // 🔥 DEBUG INFO (opsional, bisa dihapus)
+    pseudocodeRaw: pseudoSimilarity.toFixed(1),
+    flowchartRaw: flowchartScore.toFixed(1),
+    conditions: userConditions.length,
+    matches: conditionMatches
+  }
     });
 
   } catch (error) {
