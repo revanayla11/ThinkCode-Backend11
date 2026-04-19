@@ -1,20 +1,20 @@
-require("dotenv").config(); // ⬅️ WAJIB di atas
+require("dotenv").config();
 
 const { Sequelize } = require("sequelize");
 
-console.log("MYSQL_URL:", process.env.MYSQL_URL ); // debug
+// Debug (biar yakin env kebaca)
+console.log("DB_HOST:", process.env.DB_HOST);
+console.log("DB_USER:", process.env.DB_USER);
 
 const sequelize = new Sequelize(
-  process.env.MYSQL_URL || "mysql://root:@127.0.0.1:3306/thinkcode", // fallback
+  process.env.DB_NAME,
+  process.env.DB_USER,
+  process.env.DB_PASS,
   {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT || 3306,
     dialect: "mysql",
     logging: false,
-    dialectOptions: {
-      ssl: process.env.NODE_ENV === 'production' ? {
-        require: true,
-        rejectUnauthorized: false,
-      } : false,  // Local = false, Production = true
-    },
   }
 );
 
