@@ -82,37 +82,17 @@ exports.remove = async (req, res) => {
   try {
     const userId = req.params.id;
     
-    console.log(`🔄 Teacher hapus student ID: ${userId}`);
+    // RAW SQL - bypass semua
+    await sequelize.query(`DELETE FROM submissions WHERE userId = ${userId}`);
+    await sequelize.query(`DELETE FROM room_members WHERE user_id = ${userId}`);
     
-    // 1. HAPUS SUBMISSIONS
-    const deletedSubs = await sequelize.query(
-      `DELETE FROM submissions WHERE userId = ?`,
-      { replacements: [userId], type: sequelize.QueryTypes.DELETE }
-    );
-    console.log(`✅ Dihapus ${deletedSubs[1]} submissions`);
-
-    // 2. HAPUS ROOM MEMBERSHIP  
-    const deletedMembers = await RoomMember.destroy({
-      where: { user_id: userId }
-    });
-    console.log(`✅ Dihapus ${deletedMembers} room membership`);
-
-    // 3. HAPUS USER
-    const deletedUser = await User.destroy({
-      where: { id: userId },
-      force: true
-    });
+    // Hapus user
+    await User.destroy({ where: { id: userId }, force: true });
     
-    console.log(`✅ Student ${userId} DIHAPUS ✅`);
-
-    res.json({ 
-      status: true, 
-      message: `Student dihapus (${deletedSubs[1]} submissions, ${deletedMembers} rooms)`, 
-      deleted: deletedUser 
-    });
+    res.json({ status: true, message: "✅ Student dihapus" });
     
   } catch (err) {
-    console.error("❌ ERROR:", err.message);
+    console.error(err);
     res.status(500).json({ status: false, message: err.message });
   }
 };
