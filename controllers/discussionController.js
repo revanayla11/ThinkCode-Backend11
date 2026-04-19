@@ -1204,24 +1204,28 @@ exports.validateWorkspace = async (req, res) => {
     res.json({
       valid: isValid,
       score: finalScore,
+      
+      Pseudocode: `${Math.round(pseudoSimilarity)}%`,
+      Flowchart: `${Math.round(flowchartScore)}%`,
+      
+      // Legacy support
+      pseudocode: `${Math.round(pseudoSimilarity)}%`,
+      flowchart: `${Math.round(flowchartScore)}%`,
+      
+      // Details (buat debug)
       details: {
-        // 🔥 UI FRIENDLY - SELALU STRING!
         pseudocode: `${Math.round(pseudoSimilarity)}%`,
-        flowchart: `${Math.round(flowchartScore)}%`,
-        
-        // Debug info
-        pseudocodeRaw: pseudoSimilarity.toFixed(1),
-        flowchartRaw: flowchartScore.toFixed(1),
-        conditions: userConditions.length,
-        matches: conditionMatches,
-        userConditions: userConditions.map(c => normalizeCondition(c.condition)),
-        expectedConditions: expectedConditions.map(c => normalizeCondition(c.condition))
+        flowchart: `${Math.round(flowchartScore)}%`
       }
     });
 
   } catch (error) {
-    console.error("💥 VALIDATE ERROR:", error);
-    res.status(500).json({ valid: false, score: 0, error: error.message });
+    res.status(500).json({ 
+      valid: false, 
+      score: 0,
+      Pseudocode: "0%",
+      Flowchart: "0%"
+    });
   }
 };
 /* ================= TASK FUNCTIONS ================= */
