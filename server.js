@@ -94,28 +94,10 @@ const safeSync = async () => {
     await models.sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
     await models.sequelize.query('SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO"');
     console.log("🔓 Foreign keys disabled");
-    
-    // 2. DROP CORRUPT TABLES
-    const corruptTables = [
-      'user_material_progress', 
-      'discussion_rooms', 
-      'discussion_room_users'
-    ];
-    
-    for (let table of corruptTables) {
-      try {
-        await models.sequelize.query(`DROP TABLE IF EXISTS \`${table}\``);
-        console.log(`🗑️  Dropped: ${table}`);
-      } catch (e) {
-        console.log(`⚠️  Skip ${table}`);
-      }
-    }
+  
     
     // 3. FULL SYNC
-    await models.sequelize.sync({ 
-      force: true,  // FORCE recreate bersih
-      logging: false 
-    });
+    await models.sequelize.sync();
     console.log("✅ Tables recreated!");
     
     // 4. RE-ENABLE
@@ -145,6 +127,7 @@ const startServer = async () => {
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server: http://localhost:${PORT}`);
       console.log(`📱 Health: http://localhost:${PORT}/health`);
+      console.log(`🚀 Server running on port ${PORT}`);
     });
 
   } catch (error) {
