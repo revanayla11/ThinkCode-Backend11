@@ -97,7 +97,7 @@ const safeSync = async () => {
   
     
     // 3. FULL SYNC
-    await models.sequelize.sync();
+    await models.sequelize.sync({alter: true});
     console.log("✅ Tables recreated!");
     
     // 4. RE-ENABLE
@@ -106,6 +106,8 @@ const safeSync = async () => {
     
   } catch (error) {
     console.error("⚠️ Sync failed:", error.message);
+    console.error("❌ ERROR DETAIL:", err.message);
+    console.error("❌ FULL:", err);
     return false;
   }
 };
