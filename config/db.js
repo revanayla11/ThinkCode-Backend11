@@ -10,10 +10,10 @@ const sequelize = new Sequelize(
     dialect: "mysql",
     logging: false,
     dialectOptions: {
-      ssl: {
+      ssl: process.env.NODE_ENV === 'production' ? {
         require: true,
         rejectUnauthorized: false,
-      },
+      } : false,  // Local = false, Production = true
     },
   }
 );

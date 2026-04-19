@@ -80,26 +80,75 @@ app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
-// ====== START SERVER ======
+// ====== SAFE SYNC FUNCTION ======
+const safeSync = async () => {
+  try {
+    if (process.env.AUTO_SYNC !== 'false') {
+      console.log("ℹ️  Sync disabled");
+      return true;
+    }
+
+    console.log("🔄 SAFE SYNC MODE...");
+    
+    // 1. DISABLE FOREIGN KEYS
+    await models.sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
+    await models.sequelize.query('SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO"');
+    console.log("🔓 Foreign keys disabled");
+    
+    // 2. DROP CORRUPT TABLES
+    const corruptTables = [
+      'user_material_progress', 
+      'discussion_rooms', 
+      'discussion_room_users'
+    ];
+    
+    for (let table of corruptTables) {
+      try {
+        await models.sequelize.query(`DROP TABLE IF EXISTS \`${table}\``);
+        console.log(`🗑️  Dropped: ${table}`);
+      } catch (e) {
+        console.log(`⚠️  Skip ${table}`);
+      }
+    }
+    
+    // 3. FULL SYNC
+    await models.sequelize.sync({ 
+      force: true,  // FORCE recreate bersih
+      logging: false 
+    });
+    console.log("✅ Tables recreated!");
+    
+    // 4. RE-ENABLE
+    await models.sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+    return true;
+    
+  } catch (error) {
+    console.error("⚠️ Sync failed:", error.message);
+    return false;
+  }
+};
+
+// ====== START SERVER (GANTI INI!) ======
 const startServer = async () => {
   try {
-    await models.sequelize.authenticate(); 
-    console.log("✅ Database connected");
+    // Test DB
+    await models.sequelize.authenticate();
+    console.log("✅ Database ready");
 
-    // 🔥 FIXED: HAPUS AUTO-SYNC (penyebab error!)
-    // await models.sequelize.sync({ alter: true }); // ❌ HAPUS INI!
+    // SAFE SYNC
+    const syncOk = await safeSync();
     
-    // ✅ GUNAKAN KOSONG (hanya check models)
-    //await models.sequelize.sync({}); 
-    console.log("✅ Models loaded (no auto changes)");
+    if (!syncOk) {
+      console.log("⚠️ Sync failed, but continuing...");
+    }
 
     server.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🚀 Server: http://localhost:${PORT}`);
       console.log(`📱 Health: http://localhost:${PORT}/health`);
     });
 
-  } catch (err) {
-    console.error("❌ Server startup error:", err);
+  } catch (error) {
+    console.error("💥 Startup failed:", error);
     process.exit(1);
   }
 };

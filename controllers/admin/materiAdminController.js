@@ -94,7 +94,9 @@ exports.uploadOrientasi = async (req, res) => {
 
   try {
     // Generate full URL
-    const baseUrl = 'https://thinkcode-backend11-production.up.railway.app';
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://thinkcode-backend11-production.up.railway.app'
+      : 'http://localhost:5000';
     const url = `${baseUrl}/uploads/orientasi/${req.file.filename}`;
     
     console.log("Generated URL:", url);
@@ -175,7 +177,9 @@ exports.uploadSectionImage = async (req, res) => {
   }
 
   try {
-    const baseUrl = 'https://thinkcode-backend11-production.up.railway.app';
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://thinkcode-backend11-production.up.railway.app'
+      : 'http://localhost:5000';
     const url = `${baseUrl}/uploads/sections/${req.file.filename}`;
     
     // Buat folder sections jika belum ada
