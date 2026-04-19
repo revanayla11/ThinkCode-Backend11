@@ -631,8 +631,7 @@ exports.savePseudocode = async (req, res) => {
   }
 };
 
-/* ================= SAVE FLOWCHART ================= */
-/* ================= SAVE FLOWCHART - FIXED! ================= */
+/* ================= SAVE FLOWCHART - ULTRA FIXED! ================= */
 exports.saveFlowchart = async (req, res) => {
   console.log('🚀 saveFlowchart START');
   
@@ -641,9 +640,7 @@ exports.saveFlowchart = async (req, res) => {
     const roomId = parseInt(req.params.roomId);
     const { flowchart } = req.body;
 
-    console.log('📥 FLOWCHART RAW:', JSON.stringify(flowchart, null, 2));
-
-    // 🔥 CLEAN FLOWCHART
+    // 🔥 CLEAN & VALIDATE
     const cleanConditions = (flowchart.conditions || [])
       .map(c => ({
         condition: String(c.condition || '').trim(),
@@ -658,50 +655,46 @@ exports.saveFlowchart = async (req, res) => {
       showElse: Boolean(flowchart.showElse)
     };
 
-    console.log('🔧 CLEANED FLOWCHART:', {
-      rawConditions: flowchart.conditions?.length || 0,
-      cleanConditions: cleanConditions.length,
-      firstCond: cleanConditions[0]?.condition || 'EMPTY'
-    });
-
     if (cleanFlow.conditions.length === 0) {
       await transaction.rollback();
-      return res.status(400).json({ error: 'No valid conditions found' });
+      return res.status(400).json({ error: 'No valid conditions!' });
     }
 
-    // 🔥 🔥 FIXED: UPSERT SEkalIGUS - JANGAN UPDATE TERPISAH!
+    // 🔥 🔥 ULTRA FIX: STRINGIFY SEKALI SAJA + RAW JSON
+    const flowchartJSON = JSON.stringify(cleanFlow);
+    
     const [updatedCount] = await Workspace.upsert({
       roomId,
-      flowchart: cleanFlow,  // ✅ DIRECT SAVE CLEAN FLOW
+      flowchart: cleanFlow,  // Object dulu
+      flowchartRaw: flowchartJSON,  // Backup string (opsional)
       updatedAt: new Date()
     }, { transaction });
 
-    console.log('💾 UPSERT RESULT:', { updatedCount, cleanConditions: cleanFlow.conditions.length });
-
-    // 🔥 TASK 4
+    // 🔥 TASK & ATTEMPT (sama)
     await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
-
-    // 🔥 ATTEMPT COUNT
-    const attemptCount = await WorkspaceAttempt.count({ 
-      where: { roomId, type: 'flowchart' }, 
-      transaction 
-    });
     
+    const attemptCount = await WorkspaceAttempt.count({ 
+      where: { roomId, type: 'flowchart' }, transaction 
+    });
     await WorkspaceAttempt.create({
-      roomId, 
-      type: 'flowchart', 
+      roomId, type: 'flowchart', 
       attemptNumber: attemptCount + 1, 
-      content: JSON.stringify(cleanFlow)
+      content: flowchartJSON
     }, { transaction });
 
     const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
 
-    // 🔥 🔥 VERIFY SAVE - CRITICAL CHECK!
+    // 🔥 FINAL VERIFY - CRITICAL!
     const verify = await Workspace.findOne({ where: { roomId }, transaction });
+    const parsedFlow = typeof verify.flowchart === 'string' 
+      ? JSON.parse(verify.flowchart) 
+      : verify.flowchart;
+    
     console.log('✅ DB AFTER SAVE:', {
-      flowchartConditions: verify.flowchart?.conditions?.length || 0,
-      firstCondition: verify.flowchart?.conditions?.[0]?.condition || 'NONE',
-      flowchartJSON: JSON.stringify(verify.flowchart)
+      flowchartType: typeof verify.flowchart,
+      flowchartRaw: verify.flowchart,
+      parsedConditions: parsedFlow?.conditions?.length || 0,
+      firstCondition: parsedFlow?.conditions?.[0]?.condition || 'NONE'
     });
 
     await transaction.commit();
@@ -711,10 +704,9 @@ exports.saveFlowchart = async (req, res) => {
       message: `✅ Saved ${cleanFlow.conditions.length} conditions`,
       data: {
         conditions: cleanFlow.conditions.length,
-        firstCondition: cleanFlow.conditions[0]?.condition,
+        dbConditions: parsedFlow?.conditions?.length || 0,
         attempts: attemptCount + 1,
-        penalty: penaltyResult,
-        dbConditions: verify.flowchart?.conditions?.length || 0  // 🔥 CONFIRM SAVE
+        penalty: penaltyResult
       }
     });
 
@@ -1109,48 +1101,84 @@ exports.validateWorkspace = async (req, res) => {
       Workspace.findOne({ where: { roomId: parseInt(roomId) } })
     ]);
 
-    if (!room) {
-      return res.status(404).json({ valid: false, score: 0, error: "Room not found" });
-    }
-    
-    if (!workspace) {
-      return res.json({ valid: false, score: 0, message: "Workspace kosong" });
+    if (!room || !workspace) {
+      return res.json({ valid: false, score: 0, message: "Room/Workspace not found" });
     }
 
     const materiId = room.materiId;
     const expected = getExpectedAnswerByMateri(materiId);
     
-    // 🔥 PSEUDOCODE VALIDATION
+    // 🔥 PSEUDOCODE (sama)
     const userPseudoNorm = normalizePseudocode(workspace.pseudocode);
     const expectedPseudoNorm = normalizePseudocode(expected.pseudocode);
     const pseudoSimilarity = calculateSimilarity(userPseudoNorm, expectedPseudoNorm) * 100;
     
-    // 🔥 FLOWCHART VALIDATION
+    // 🔥 🔥 FLOWCHART - FORCE PARSE!
     let flowchartScore = 0;
-    if (workspace.flowchart && Array.isArray(workspace.flowchart.conditions)) {
-      const userConditions = workspace.flowchart.conditions;
-      const expectedConditions = expected.flowchart.conditions || [];
-      
-      let conditionMatches = 0;
-      userConditions.forEach((userCond, i) => {
-        if (i < expectedConditions.length) {
-          const condSim = calculateSimilarity(
-            normalizeCondition(userCond.condition), 
-            normalizeCondition(expectedConditions[i].condition)
-          );
-          if (condSim > 0.7) conditionMatches++;
+    let userConditions = [];
+    
+    if (workspace.flowchart) {
+      try {
+        // 🔥 PARSE APA PUN FORMATNYA
+        let flowchartData;
+        if (typeof workspace.flowchart === 'string') {
+          flowchartData = JSON.parse(workspace.flowchart);
+        } else if (typeof workspace.flowchart === 'object') {
+          flowchartData = workspace.flowchart;
+        } else {
+          throw new Error('Invalid flowchart format');
         }
-      });
-      
-      flowchartScore = (conditionMatches / Math.max(userConditions.length, expectedConditions.length)) * 100;
+        
+        userConditions = Array.isArray(flowchartData.conditions) 
+          ? flowchartData.conditions.filter(c => c.condition?.trim())
+          : [];
+          
+        console.log('🔄 FLOWCHART PARSED:', {
+          rawType: typeof workspace.flowchart,
+          rawPreview: JSON.stringify(workspace.flowchart).substring(0, 100),
+          conditions: userConditions.length,
+          firstCond: userConditions[0]?.condition
+        });
+        
+      } catch (parseError) {
+        console.error('💥 FLOWCHART PARSE ERROR:', parseError.message);
+      }
     }
+    
+    // 🔥 VALIDATE CONDITIONS
+    const expectedConditions = expected.flowchart.conditions || [];
+    let conditionMatches = 0;
+    
+    userConditions.forEach((userCond, i) => {
+      if (i < expectedConditions.length) {
+        const condSim = calculateSimilarity(
+          normalizeCondition(userCond.condition), 
+          normalizeCondition(expectedConditions[i].condition)
+        );
+        console.log(`⚡ COND ${i}:`, {
+          user: normalizeCondition(userCond.condition),
+          expected: normalizeCondition(expectedConditions[i].condition),
+          similarity: condSim.toFixed(2)
+        });
+        
+        if (condSim > 0.6) {  // Lower threshold
+          conditionMatches++;
+        }
+      }
+    });
+    
+    flowchartScore = userConditions.length > 0 
+      ? (conditionMatches / Math.min(userConditions.length, expectedConditions.length)) * 100
+      : 0;
 
     const finalScore = Math.round((pseudoSimilarity * 0.6 + flowchartScore * 0.4));
     const isValid = finalScore >= 80;
-
-    console.log(`✅ VALIDATION RESULT:`, {
+    
+    console.log(`🎯 FINAL RESULT:`, {
       pseudoSimilarity: pseudoSimilarity.toFixed(1),
       flowchartScore: flowchartScore.toFixed(1),
+      userConditions: userConditions.length,
+      matches: conditionMatches,
       finalScore,
       isValid
     });
@@ -1159,21 +1187,20 @@ exports.validateWorkspace = async (req, res) => {
       valid: isValid,
       score: finalScore,
       details: {
-        pseudocodeSimilarity: pseudoSimilarity.toFixed(1),
-        flowchartScore: flowchartScore.toFixed(1),
-        pseudocodeMatch: userPseudoNorm === expectedPseudoNorm,
-        hasFlowchart: !!workspace.flowchart,
-        conditionsCount: workspace.flowchart?.conditions?.length || 0
+        pseudocode: { similarity: pseudoSimilarity.toFixed(1) },
+        flowchart: { 
+          score: flowchartScore.toFixed(1),
+          conditions: userConditions.length,
+          matches: conditionMatches,
+          rawType: typeof workspace.flowchart,
+          rawPreview: JSON.stringify(workspace.flowchart).substring(0, 100)
+        }
       }
     });
 
   } catch (error) {
     console.error("💥 VALIDATE ERROR:", error);
-    res.status(500).json({ 
-      valid: false, 
-      score: 0, 
-      error: "Validation timeout - coba lagi" 
-    });
+    res.status(500).json({ valid: false, score: 0, error: error.message });
   }
 };
 /* ================= TASK FUNCTIONS ================= */
