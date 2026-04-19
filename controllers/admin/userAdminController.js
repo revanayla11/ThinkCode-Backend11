@@ -79,53 +79,36 @@ exports.resetPassword = async (req,res)=>{
 };
 
 exports.remove = async (req, res) => {
-  const transaction = await sequelize.transaction(); // Import sequelize dulu!
   try {
     const userId = req.params.id;
     
-    console.log(`🔄 Menghapus user ID: ${userId}`);
+    console.log(`🔄 Teacher hapus student ID: ${userId}`);
     
-    // 1. HAPUS ROOM MEMBER dulu (relasi utama)
+    // 1. Hapus student dari semua ROOM
     const deletedMembers = await RoomMember.destroy({
-      where: { user_id: userId },
-      transaction
+      where: { user_id: userId }
     });
-    console.log(`✅ Dihapus ${deletedMembers} RoomMember`);
+    console.log(`✅ Dihapus ${deletedMembers} room membership`);
 
-    // 2. HAPUS DISCUSSION ROOM yang dibuat user (jika teacher)
-    const deletedRooms = await DiscussionRoom.destroy({
-      where: { teacher_id: userId }, // sesuaikan nama kolom
-      transaction
-    });
-    console.log(`✅ Dihapus ${deletedRooms} DiscussionRoom`);
-
-    // 3. HAPUS USER
+    // 2. Hapus STUDENT account
     const deletedUser = await User.destroy({
       where: { id: userId },
-      force: true, // Skip soft delete
-      transaction
+      force: true
     });
     
-    console.log(`✅ User ${userId} dihapus: ${!!deletedUser}`);
+    console.log(`✅ Student ${userId} dihapus: ${!!deletedUser}`);
 
-    await transaction.commit();
-    
     res.json({ 
       status: true, 
-      message: "User dihapus berhasil",
-      deleted: { user: deletedUser, members: deletedMembers, rooms: deletedRooms }
+      message: `Student dihapus (${deletedMembers} room membership)`, 
+      deleted: deletedUser 
     });
     
   } catch (err) {
-    await transaction.rollback();
-    console.error("❌ DELETE ERROR:", err.message);
-    console.error("❌ FULL ERROR:", err);
-    
+    console.error("❌ ERROR:", err.message);
     res.status(500).json({ 
       status: false, 
-      message: err.message.includes('FOREIGN KEY') 
-        ? "Gagal hapus: User masih terdaftar di room/kelas"
-        : "Server error" 
+      message: "Gagal hapus student" 
     });
   }
 };
