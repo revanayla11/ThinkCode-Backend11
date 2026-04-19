@@ -447,19 +447,35 @@ exports.getWorkspaceData = async (req, res) => {
     const roomId = parseInt(req.params.roomId);
     const workspace = await Workspace.findOne({ where: { roomId } });
     
-    console.log(`🔍 JSON room ${roomId}:`, {
-      exists: !!workspace,
-      flowchart: workspace?.flowchart ? `${workspace.flowchart.conditions?.length || 0} conds` : 'null'
-    });
-
-    // 🔥 DIRECT ACCESS - NO PARSING!
-    const flowchartObj = workspace?.flowchart || { 
+    // 🔥 FIXED: PASTIKAN FLOWCHART SELALU OBJECT VALID
+    let flowchartObj = { 
       conditions: [], 
       elseInstruction: "", 
       showElse: false 
     };
+    
+    if (workspace?.flowchart) {
+      try {
+        // 🔥 PARSE ULANG JIKA STRING
+        if (typeof workspace.flowchart === 'string') {
+          flowchartObj = JSON.parse(workspace.flowchart);
+        } else {
+          flowchartObj = workspace.flowchart;
+        }
+        // 🔥 VALIDASI MINIMAL
+        flowchartObj.conditions = Array.isArray(flowchartObj.conditions) ? flowchartObj.conditions : [];
+      } catch (e) {
+        console.error('🔥 FLOWCHART PARSE ERROR:', e);
+        flowchartObj = { conditions: [], elseInstruction: "", showElse: false };
+      }
+    }
+    
+    console.log(`🔍 JSON room ${roomId}:`, {
+      exists: !!workspace,
+      flowchart: `${flowchartObj.conditions.length} conds`,
+      firstCond: flowchartObj.conditions[0]?.condition || 'NONE'
+    });
 
-    // 🔥 TASKS
     const tasks = await RoomTaskProgress.findAll({ where: { roomId } });
     const taskMap = {};
     tasks.forEach(t => taskMap[t.taskId] = t.done);
@@ -616,6 +632,7 @@ exports.savePseudocode = async (req, res) => {
 };
 
 /* ================= SAVE FLOWCHART ================= */
+/* ================= SAVE FLOWCHART - FIXED! ================= */
 exports.saveFlowchart = async (req, res) => {
   console.log('🚀 saveFlowchart START');
   
@@ -626,21 +643,13 @@ exports.saveFlowchart = async (req, res) => {
 
     console.log('📥 FLOWCHART RAW:', JSON.stringify(flowchart, null, 2));
 
-    // 🔥 GET EXISTING WORKSPACE
-    const existing = await Workspace.findOne({ where: { roomId }, transaction });
-    if (!existing) {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'Workspace not found' });
-    }
-
-    // 🔥 CLEAN FLOWCHART - FIXED!
+    // 🔥 CLEAN FLOWCHART
     const cleanConditions = (flowchart.conditions || [])
       .map(c => ({
         condition: String(c.condition || '').trim(),
         yes: String(c.yes || '').trim(),
         no: String(c.no || '').trim()
       }))
-      // 🔥 FIXED: HANYA FILTER KONDISI 100% KOSONG
       .filter(c => c.condition.length > 0);
 
     const cleanFlow = {
@@ -660,11 +669,14 @@ exports.saveFlowchart = async (req, res) => {
       return res.status(400).json({ error: 'No valid conditions found' });
     }
 
-    // 🔥 UPDATE WORKSPACE
-    await Workspace.update({
-      flowchart: cleanFlow,
+    // 🔥 🔥 FIXED: UPSERT SEkalIGUS - JANGAN UPDATE TERPISAH!
+    const [updatedCount] = await Workspace.upsert({
+      roomId,
+      flowchart: cleanFlow,  // ✅ DIRECT SAVE CLEAN FLOW
       updatedAt: new Date()
-    }, { where: { roomId }, transaction });
+    }, { transaction });
+
+    console.log('💾 UPSERT RESULT:', { updatedCount, cleanConditions: cleanFlow.conditions.length });
 
     // 🔥 TASK 4
     await RoomTaskProgress.upsert({ roomId, taskId: 4, done: true }, { transaction });
@@ -684,12 +696,12 @@ exports.saveFlowchart = async (req, res) => {
 
     const penaltyResult = await exports.applyAttemptPenalty(roomId, transaction);
 
-    // 🔥 VERIFY SAVE - FIXED LOG
+    // 🔥 🔥 VERIFY SAVE - CRITICAL CHECK!
     const verify = await Workspace.findOne({ where: { roomId }, transaction });
     console.log('✅ DB AFTER SAVE:', {
-      pseudocodeLength: verify.pseudocode?.length || 0,
       flowchartConditions: verify.flowchart?.conditions?.length || 0,
-      firstCondition: verify.flowchart?.conditions?.[0]?.condition || 'NONE'
+      firstCondition: verify.flowchart?.conditions?.[0]?.condition || 'NONE',
+      flowchartJSON: JSON.stringify(verify.flowchart)
     });
 
     await transaction.commit();
@@ -701,7 +713,8 @@ exports.saveFlowchart = async (req, res) => {
         conditions: cleanFlow.conditions.length,
         firstCondition: cleanFlow.conditions[0]?.condition,
         attempts: attemptCount + 1,
-        penalty: penaltyResult
+        penalty: penaltyResult,
+        dbConditions: verify.flowchart?.conditions?.length || 0  // 🔥 CONFIRM SAVE
       }
     });
 
@@ -1107,138 +1120,50 @@ exports.validateWorkspace = async (req, res) => {
     const materiId = room.materiId;
     const expected = getExpectedAnswerByMateri(materiId);
     
-    console.log(`🎯 MATERI ${materiId} EXPECTED:`, {
-      pseudoLength: expected.pseudocode.length,
-      flowConditions: expected.flowchart.conditions.length,
-      hasElse: expected.flowchart.showElse
-    });
-    
-    /* ================= PSEUDOCODE VALIDATION ================= */
+    // 🔥 PSEUDOCODE VALIDATION
     const userPseudoNorm = normalizePseudocode(workspace.pseudocode);
     const expectedPseudoNorm = normalizePseudocode(expected.pseudocode);
     const pseudoSimilarity = calculateSimilarity(userPseudoNorm, expectedPseudoNorm) * 100;
     
-    console.log('📝 PSEUDOCODE:', {
-      userLength: userPseudoNorm.length,
-      expectedLength: expectedPseudoNorm.length,
-      similarity: pseudoSimilarity.toFixed(1) + '%',
-      exactMatch: userPseudoNorm === expectedPseudoNorm
-    });
-    
-    /* ================= FLOWCHART VALIDATION - FIXED! ================= */
+    // 🔥 FLOWCHART VALIDATION
     let flowchartScore = 0;
-    let flowchartDetails = {
-      userConditions: 0,
-      expectedConditions: 0,
-      matches: 0,
-      hasElse: false,
-      elseMatch: false
-    };
-    
     if (workspace.flowchart && Array.isArray(workspace.flowchart.conditions)) {
-      const userConditions = workspace.flowchart.conditions.filter(c => c.condition?.trim());
+      const userConditions = workspace.flowchart.conditions;
       const expectedConditions = expected.flowchart.conditions || [];
       
-      flowchartDetails.userConditions = userConditions.length;
-      flowchartDetails.expectedConditions = expectedConditions.length;
-      
-      console.log('🔄 FLOWCHART RAW:', {
-        userConditions: userConditions.map(c => ({ cond: c.condition, yes: c.yes?.substring(0,30) })),
-        expectedConditions: expectedConditions.map(c => ({ cond: c.condition, yes: c.yes?.substring(0,30) }))
+      let conditionMatches = 0;
+      userConditions.forEach((userCond, i) => {
+        if (i < expectedConditions.length) {
+          const condSim = calculateSimilarity(
+            normalizeCondition(userCond.condition), 
+            normalizeCondition(expectedConditions[i].condition)
+          );
+          if (condSim > 0.7) conditionMatches++;
+        }
       });
       
-      let conditionMatches = 0;
-      let totalEvaluated = Math.min(userConditions.length, expectedConditions.length);
-      
-      // 🔥 COMPARE EACH CONDITION PAIR
-      for (let i = 0; i < totalEvaluated; i++) {
-        const userCond = normalizeCondition(userConditions[i].condition);
-        const expCond = normalizeCondition(expectedConditions[i].condition);
-        const userYes = normalizeInstruction(userConditions[i].yes || '');
-        const expYes = normalizeInstruction(expectedConditions[i].yes || '');
-        
-        const condSim = calculateSimilarity(userCond, expCond);
-        const yesSim = calculateSimilarity(userYes, expYes);
-        
-        const isCondMatch = condSim > 0.6; // 🔥 LOWERED FROM 0.7
-        const isYesMatch = yesSim > 0.5;
-        
-        console.log(`⚡ COND ${i}:`, {
-          userCond,
-          expCond,
-          condSim: condSim.toFixed(2),
-          userYes: userYes.substring(0,20),
-          expYes: expYes.substring(0,20),
-          yesSim: yesSim.toFixed(2),
-          match: (isCondMatch || isYesMatch) ? '✅' : '❌'
-        });
-        
-        if (isCondMatch || isYesMatch) {
-          conditionMatches++;
-        }
-      }
-      
-      // 🔥 BASE SCORE
-      flowchartScore = totalEvaluated > 0 
-        ? (conditionMatches / totalEvaluated) * 70  // 70% dari kondisi
-        : 0;
-      
-      // 🔥 ELSE BONUS (20%)
-      const expectedHasElse = expected.flowchart.showElse;
-      const userHasElse = workspace.flowchart.showElse;
-      flowchartDetails.hasElse = userHasElse;
-      
-      if (expectedHasElse && userHasElse) {
-        const elseSim = workspace.flowchart.elseInstruction 
-          ? calculateSimilarity(
-              normalizeInstruction(workspace.flowchart.elseInstruction),
-              normalizeInstruction(expected.flowchart.elseInstruction)
-            )
-          : 0;
-        
-        flowchartDetails.elseMatch = elseSim > 0.5;
-        if (flowchartDetails.elseMatch) {
-          flowchartScore += 20;
-        } else {
-          flowchartScore += 10; // Partial credit
-        }
-      } else if (!expectedHasElse && !userHasElse) {
-        flowchartScore += 10; // Bonus no-else correct
-      }
-      
-      flowchartScore = Math.min(100, flowchartScore);
-      flowchartDetails.matches = conditionMatches;
+      flowchartScore = (conditionMatches / Math.max(userConditions.length, expectedConditions.length)) * 100;
     }
-    
-    /* ================= FINAL SCORE ================= */
+
     const finalScore = Math.round((pseudoSimilarity * 0.6 + flowchartScore * 0.4));
     const isValid = finalScore >= 80;
-    
-    console.log(`🎯 FINAL RESULT:`, {
+
+    console.log(`✅ VALIDATION RESULT:`, {
       pseudoSimilarity: pseudoSimilarity.toFixed(1),
       flowchartScore: flowchartScore.toFixed(1),
       finalScore,
-      isValid,
-      flowchartDetails
+      isValid
     });
 
     res.json({
       valid: isValid,
       score: finalScore,
       details: {
-        pseudocode: {
-          similarity: pseudoSimilarity.toFixed(1),
-          match: userPseudoNorm === expectedPseudoNorm,
-          length: workspace.pseudocode?.length || 0
-        },
-        flowchart: {
-          ...flowchartDetails,
-          score: flowchartScore.toFixed(1)
-        },
-        breakdown: {
-          pseudocodeWeight: (pseudoSimilarity * 0.6).toFixed(0),
-          flowchartWeight: (flowchartScore * 0.4).toFixed(0)
-        }
+        pseudocodeSimilarity: pseudoSimilarity.toFixed(1),
+        flowchartScore: flowchartScore.toFixed(1),
+        pseudocodeMatch: userPseudoNorm === expectedPseudoNorm,
+        hasFlowchart: !!workspace.flowchart,
+        conditionsCount: workspace.flowchart?.conditions?.length || 0
       }
     });
 
@@ -1247,7 +1172,7 @@ exports.validateWorkspace = async (req, res) => {
     res.status(500).json({ 
       valid: false, 
       score: 0, 
-      error: "Validation error - coba lagi" 
+      error: "Validation timeout - coba lagi" 
     });
   }
 };
